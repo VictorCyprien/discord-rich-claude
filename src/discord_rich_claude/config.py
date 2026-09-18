@@ -4,6 +4,7 @@ Tout défaut de config retombe sur Config() : aucun projet autorisé, pas de
 client_id, donc rien de montré (refus par défaut).
 """
 import logging
+import math
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +27,7 @@ def charger(chemin: Path) -> Config:
     except FileNotFoundError:
         log.warning("config absente : %s", chemin)
         return Config()
-    except (OSError, tomllib.TOMLDecodeError) as e:
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
         log.warning("config illisible, rien ne sera affiché : %s", e)
         return Config()
     try:
@@ -48,10 +49,14 @@ def _valider(brut: dict) -> Config:
         raise TypeError("projets.autorises doit être une liste de chemins")
     chemins = []
     for p in autorises:
-        chemin = Path(p).expanduser()
-        if not chemin.is_absolute():
-            raise ValueError(f"chemin relatif refusé : {p}")
-        chemins.append(chemin.resolve())
+        try:
+            chemin = Path(p).expanduser()
+            if not chemin.is_absolute():
+                raise ValueError(f"chemin relatif refusé : {p}")
+            chemin = chemin.resolve()
+        except RuntimeError:
+            raise ValueError(f"chemin invalide refusé : {p}") from None
+        chemins.append(chemin)
     return Config(
         client_id=str(cid) if cid not in (None, "") else None,
         inactif_apres_min=_positif(brut.get("inactif_apres_min", 10), "inactif_apres_min"),
@@ -63,6 +68,8 @@ def _valider(brut: dict) -> Config:
 def _positif(valeur: object, nom: str) -> float:
     if isinstance(valeur, bool) or not isinstance(valeur, (int, float)):
         raise TypeError(f"{nom} doit être un nombre")
+    if not math.isfinite(valeur):
+        raise ValueError(f"{nom} doit être fini")
     if valeur <= 0:
         raise ValueError(f"{nom} doit être positif")
     return valeur

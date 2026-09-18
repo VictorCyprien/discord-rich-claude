@@ -63,6 +63,27 @@ def test_chemin_relatif_refuse_tout(tmp_path):
     assert charger(f) == Config()
 
 
+def test_encodage_invalide_refuse_tout(tmp_path):
+    f = tmp_path / "c.toml"
+    f.write_bytes(b'client_id = "\xff\xfe bad"\n')
+    assert charger(f) == Config()
+
+
+def test_chemin_utilisateur_inconnu_refuse_tout(tmp_path):
+    f = ecrire(
+        tmp_path / "c.toml",
+        '[projets]\nautorises = ["~nonexistentuser999/projet"]\n',
+    )
+    assert charger(f) == Config()
+
+
+def test_valeur_non_finie_refuse_tout(tmp_path):
+    f = ecrire(tmp_path / "c.toml", "inactif_apres_min = nan\n")
+    assert charger(f) == Config()
+    f = ecrire(tmp_path / "c2.toml", "rotation_s = inf\n")
+    assert charger(f) == Config()
+
+
 def test_client_id_absent_garde_la_liste_blanche(tmp_path):
     projet = tmp_path / "p"
     projet.mkdir()
