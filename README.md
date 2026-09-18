@@ -1,0 +1,75 @@
+# discord-rich-claude
+
+Affiche sur ton profil Discord une carte « Joue à Claude Code » quand une session Claude Code tourne : activité en cours, modèle, tokens, durée. Le nom du projet n'apparaît que pour les dossiers que tu autorises.
+
+Tout reste local : les hooks de Claude Code parlent au daemon par un socket Unix, le daemon parle à Discord par sa connexion locale. Aucune donnée ne part sur le réseau.
+
+## Installation
+
+1. Crée l'application Discord : https://discord.com/developers/applications > New Application. Le Developer Portal refuse un nom avec une espace (erreur 50277, testé avec « Claude Code ») : utilise par exemple `ClaudeCode` ou `Claude·Code`. Le titre de la carte est le nom de l'application. Dans Rich Presence > Art Assets, dépose une image carrée (≥ 512 px) sous la clé d'asset `logo`. Copie l'Application ID (General Information).
+2. Installe l'outil, depuis un terminal classique, sans venv de projet actif et sans passer par `uv run` (sinon le LaunchAgent pointerait vers l'exécutable de ton `PATH` du moment, pas vers celui réellement installé) :
+
+   ```bash
+   uv tool install /chemin/vers/DiscordRichClaude
+   discord-rich-claude install
+   ```
+
+   `install` refuse de tourner avec `sudo`. Il te montre la différence sur `~/.claude/settings.json` et attend un « o » explicite (Ctrl-C ou Ctrl-D = refus, rien n'est modifié) ; s'il relit le fichier et le trouve changé entre-temps, il n'écrit rien et affiche « settings.json non modifié : … » — relance simplement la commande. Il sauvegarde l'ancien fichier en `settings.json.bak-AAAAMMJJ-HHMMSS` (jamais écrasée) avant d'écrire le nouveau de façon atomique, en gardant les hooks des autres outils. Il crée ensuite la config (si absente) et le LaunchAgent qui lance le daemon à l'ouverture de ta session macOS, puis affiche « LaunchAgent chargé ».
+
+   Vérifie la ligne « exécutable : … » affichée pendant l'étape LaunchAgent : elle doit pointer vers `~/.local/bin/discord-rich-claude`, pas vers un `.venv` de checkout de développement.
+
+   Les sessions Claude Code déjà ouvertes prennent en compte les nouveaux hooks sans redémarrage (les hooks sont rechargés à chaud depuis les fichiers de settings).
+3. Renseigne `~/.config/discord-rich-claude/config.toml` :
+
+   ```toml
+   client_id = "ton Application ID"
+   inactif_apres_min = 10
+   rotation_s = 20
+
+   [projets]
+   autorises = ["/chemin/complet/vers/un/projet"]
+   ```
+
+   La config est relue toute seule quand elle change. Sans `client_id`, le daemon journalise une seule erreur (« client_id absent : pas de connexion à Discord ») et n'affiche rien.
+
+   Dans Discord, active Paramètres > Confidentialité de l'activité > « Partager mon activité ».
+
+## Ce qui s'affiche
+
+- Ligne 1 : l'activité (« Écrit du code », « Lance une commande », « Pilote 3 sous-agents », « Attend ta réponse », « Inactif »…), puis le nom du projet s'il est autorisé, sinon « Projet privé ».
+- Ligne 2, en alternance toutes les `rotation_s` secondes : le modèle et les tokens de la session, puis le nombre de sessions et le cumul du jour.
+- Le chrono part de l'ouverture de la plus ancienne session encore ouverte.
+
+Les tokens comptés excluent les lectures du cache. Discord limite la mise à jour de la carte à une fois toutes les 15 s : l'activité peut avoir jusqu'à 15 s de retard.
+
+## Confidentialité
+
+- Refus par défaut : un projet absent de `projets.autorises` s'affiche « Projet privé ». La comparaison porte sur le chemin complet.
+- Jamais affiché : noms de fichiers, commandes, prompts, branche git, chemins.
+- Le daemon ne garde que quelques champs de chaque hook (identifiant de session, dossier, type d'événement, nom d'outil). Le texte des prompts et le contenu des outils sont jetés à la réception et jamais écrits dans le log.
+
+## Commandes
+
+| Commande | Effet |
+|---|---|
+| `discord-rich-claude status` | Daemon joignable, Discord connecté, nombre de sessions |
+| `discord-rich-claude install` | Hooks, config, LaunchAgent (relançable sans risque) |
+| `discord-rich-claude uninstall` | Retire nos hooks et le LaunchAgent, garde la config |
+| `discord-rich-claude run` | Lance le daemon au premier plan (le LaunchAgent le fait pour toi) |
+
+## Dépannage
+
+- Log : `~/Library/Logs/discord-rich-claude/daemon.log` (tourne automatiquement). Plus de détail : `DRC_LOG=DEBUG discord-rich-claude run` après `launchctl bootout gui/$(id -u)/local.discord-rich-claude`. Le LaunchAgent écrit aussi `launchd.out.log` et `launchd.err.log` dans le même dossier.
+- Pas de carte : vérifie `client_id`, que Discord desktop tourne, et Paramètres Discord > Confidentialité de l'activité > « Partager mon activité ».
+- Le daemon arrêté ne gêne jamais Claude Code : les hooks échouent sans bruit.
+
+## Développement
+
+```bash
+uv sync
+uv run pytest -q
+```
+
+La suite tourne sous Python 3.12 et 3.13 : `uv run --isolated --python 3.13 --group dev pytest -q`.
+
+Spec : `docs/superpowers/specs/2026-09-18-discord-rich-claude-design.md`.
