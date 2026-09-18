@@ -238,12 +238,26 @@ Test d'abord, à chaque étape du plan.
 ## 12. Hypothèses à vérifier en L1
 
 1. Dans un hook synchrone, `$PPID` est le PID du processus Claude Code.
+   Résultat (2026-09-18) : confirmée — dans les trois sessions de sonde, `$PPID` était le processus `claude`, le même pour le fil principal et ses sous-agents, et ce pid était mort après `/exit`.
 2. Les événements d'un sous-agent portent le `session_id` de la session parente.
+   Résultat (2026-09-18) : confirmée — les événements des trois sous-agents Explore portaient le `session_id` de la session parente.
 3. `SubagentStop` se déclenche aussi pour les sous-agents en arrière-plan.
+   Résultat (2026-09-18) : confirmée — `SubagentStop` part avec `agent_id` et `agent_type` pour chaque sous-agent d'arrière-plan qui se termine. Un sous-agent coupé par `/exit` n'émet rien ; `SessionEnd` le couvre. L'outil qui lance un sous-agent s'appelle bien `Agent`.
 4. `PermissionRequest` se déclenche dans le mode de permission habituel de Victor (`auto`) quand une validation est demandée.
+   Résultat (2026-09-18) : confirmée — en mode Manual, la demande de validation d'une commande a émis `PermissionRequest` (`tool_name` `Bash`) avant la décision. En mode `auto`, la même commande n'a demandé aucune validation et aucun événement n'est parti, comme attendu.
 5. Latence réelle d'un hook synchrone `curl` sur le socket (~10 ms supposé).
+   Résultat : à mesurer en Task 8.
 6. Limite de fréquence de Discord sur la mise à jour d'activité, pour fixer l'intervalle minimal de la section 5.
+   Résultat (2026-09-18) : confirmée — la documentation Discord (Setting Rich Presence) limite la mise à jour d'activité à une toutes les 15 secondes ; l'issue discord/discord-api-docs#668 montre qu'un dépassement peut vider la présence au lieu de la mettre en file. Intervalle minimal retenu : 15 s.
 7. Emplacement des transcripts de sous-agents : `<dossier du transcript>/<session_id>/subagents/`. Constaté sur une session le 2026-09-18, à confirmer.
+   Résultat (2026-09-18) : confirmée — `agent_transcript_path` pointe vers `<dossier du transcript>/<session_id>/subagents/agent-<agent_id>.jsonl` ; fichier présent pour chacun des trois sous-agents Explore.
+
+Constats annexes de la sonde (2026-09-18) :
+
+- Claude Code émet des `SubagentStop` pour des agents internes, sans `SubagentStart` ni `agent_type`, et sans fichier de transcript. Le registre les absorbe : retirer un `agent_id` inconnu ne fait rien.
+- `UserPromptSubmit` part aussi quand un sous-agent rend son résultat ou qu'une tâche de fond notifie le fil principal : le fil principal se remet alors au travail, « Réfléchit » est juste.
+- Le fil principal émet `Stop` pendant que ses sous-agents d'arrière-plan tournent encore ; la priorité de 4.3 (sous-agents avant fil principal) affiche alors « Pilote N sous-agents ».
+- Une session déjà ouverte a rechargé à chaud les hooks ajoutés à `.claude/settings.local.json` et s'est mise à les exécuter. Même comportement attendu pour `~/.claude/settings.json`, à confirmer en Task 11.
 
 Si une hypothèse tombe, le design de la section concernée est revu avant L2.
 
