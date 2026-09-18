@@ -3,6 +3,7 @@ import json
 import os
 import plistlib
 import stat
+import subprocess
 from datetime import datetime
 
 import pytest
@@ -342,3 +343,95 @@ def test_installer_launch_agent_executer_par_defaut_nest_pas_fige_a_la_definitio
 
 def test_desinstaller_launch_agent_executer_par_defaut_nest_pas_fige_a_la_definition():
     assert inspect.signature(desinstaller_launch_agent).parameters["executer"].default is None
+
+
+# --- Fix round 2 (final-fix wave) : F6 -- réessai de bootstrap sur le code 5 ---
+
+
+def _executeur_bootstrap_echoue_n_fois(n, code=5):
+    appels = []
+
+    def executer(cmd, **kw):
+        appels.append(cmd)
+        if cmd[1] == "bootstrap":
+            deja = len([c for c in appels if c[1] == "bootstrap"])
+            if deja <= n:
+                raise subprocess.CalledProcessError(code, cmd)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    return executer, appels
+
+
+def test_installer_launch_agent_reessaie_bootstrap_sur_code_5_puis_reussit(tmp_path):
+    chemin = tmp_path / "LaunchAgents" / f"{LABEL}.plist"
+    executer, appels = _executeur_bootstrap_echoue_n_fois(2, code=5)
+    dodo = []
+
+    installer_launch_agent(chemin, b"<plist/>", executer=executer, dormir=dodo.append)
+
+    bootstraps = [c for c in appels if c[1] == "bootstrap"]
+    assert len(bootstraps) == 3
+    assert dodo == [0.5, 0.5]
+
+
+def test_installer_launch_agent_reessaie_bootstrap_sur_code_37(tmp_path):
+    chemin = tmp_path / "LaunchAgents" / f"{LABEL}.plist"
+    executer, appels = _executeur_bootstrap_echoue_n_fois(1, code=37)
+    dodo = []
+
+    installer_launch_agent(chemin, b"<plist/>", executer=executer, dormir=dodo.append)
+
+    bootstraps = [c for c in appels if c[1] == "bootstrap"]
+    assert len(bootstraps) == 2
+    assert dodo == [0.5]
+
+
+def test_installer_launch_agent_echoue_apres_3_tentatives_sur_code_5(tmp_path):
+    chemin = tmp_path / "LaunchAgents" / f"{LABEL}.plist"
+    executer, appels = _executeur_bootstrap_echoue_n_fois(4, code=5)
+    dodo = []
+
+    with pytest.raises(subprocess.CalledProcessError):
+        installer_launch_agent(chemin, b"<plist/>", executer=executer, dormir=dodo.append)
+
+    bootstraps = [c for c in appels if c[1] == "bootstrap"]
+    assert len(bootstraps) == 3
+    assert dodo == [0.5, 0.5]
+
+
+def test_installer_launch_agent_autre_code_echoue_sans_reessai(tmp_path):
+    chemin = tmp_path / "LaunchAgents" / f"{LABEL}.plist"
+    executer, appels = _executeur_bootstrap_echoue_n_fois(4, code=1)
+    dodo = []
+
+    with pytest.raises(subprocess.CalledProcessError):
+        installer_launch_agent(chemin, b"<plist/>", executer=executer, dormir=dodo.append)
+
+    bootstraps = [c for c in appels if c[1] == "bootstrap"]
+    assert len(bootstraps) == 1
+    assert dodo == []
+
+
+# --- Fix round 2 (final-fix wave) : F7 -- sauvegarde jamais plus large que son mode final ---
+
+
+def test_modifier_settings_sauvegarde_deja_au_bon_mode_des_la_creation(tmp_path, monkeypatch):
+    """F7 : si l'appel qui resserre les droits après coup est neutralisé, la
+    sauvegarde doit déjà avoir le bon mode dès sa création (mode passé à la
+    création elle-même, pas seulement un chmod après coup) — preuve qu'aucun
+    instant plus permissif n'existe jamais entre la création et la correction,
+    même sous un umask qui aurait élargi un mode par défaut (0600 original)."""
+    f = tmp_path / "settings.json"
+    f.write_text(json.dumps(settings_tiers()), encoding="utf-8")
+    f.chmod(0o600)
+
+    monkeypatch.setattr("discord_rich_claude.installation.os.chmod", lambda *a, **kw: None)
+    monkeypatch.setattr("discord_rich_claude.installation.os.fchmod", lambda *a, **kw: None)
+    ancien_umask = os.umask(0o022)
+    try:
+        assert modifier_settings(f, ajouter_hooks, lambda d: True, horloge) == "modifié"
+    finally:
+        os.umask(ancien_umask)
+
+    sauvegarde = tmp_path / "settings.json.bak-20260918-143005"
+    assert stat.S_IMODE(sauvegarde.stat().st_mode) == 0o600

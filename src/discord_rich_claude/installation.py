@@ -15,6 +15,7 @@ import plistlib
 import stat
 import subprocess
 import tempfile
+import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -98,18 +99,24 @@ def _lire_bytes(chemin: Path) -> bytes | None:
 
 
 def _sauvegarder(chemin: Path, contenu: bytes, mode: int, horloge: Callable[[], datetime]) -> None:
-    """Sauvegarde exclusive : jamais d'écrasement d'une sauvegarde existante."""
+    """Sauvegarde exclusive : jamais d'écrasement d'une sauvegarde existante.
+
+    Créée directement au mode voulu (`os.open`, pas le `open()` par défaut qui
+    créerait à 0o666 moins l'umask) puis `fchmod` avant toute écriture : jamais
+    un instant où le fichier est plus permissif que l'original (umask-proof).
+    """
     base = chemin.with_name(f"{chemin.name}.bak-{horloge():%Y%m%d-%H%M%S}")
     suffixe = 0
     while True:
         nom = base if suffixe == 0 else base.with_name(f"{base.name}-{suffixe}")
         try:
-            with open(nom, "xb") as f:
-                f.write(contenu)
+            fd = os.open(nom, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
         except FileExistsError:
             suffixe += 1
             continue
-        os.chmod(nom, mode)
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "wb") as f:
+            f.write(contenu)
         return
 
 
@@ -199,8 +206,16 @@ def _ecrire_plist_atomique(chemin_plist: Path, contenu: bytes) -> None:
         raise
 
 
+REESSAIS_BOOTSTRAP = 3
+DELAI_REESSAI_BOOTSTRAP_S = 0.5
+CODES_BOOTSTRAP_TRANSITOIRES = (5, 37)
+
+
 def installer_launch_agent(
-    chemin_plist: Path, contenu: bytes, executer: Callable | None = None
+    chemin_plist: Path,
+    contenu: bytes,
+    executer: Callable | None = None,
+    dormir: Callable[[float], None] = time.sleep,
 ) -> None:
     executer = executer or subprocess.run
     domaine = f"gui/{os.getuid()}"
@@ -209,7 +224,20 @@ def installer_launch_agent(
     _ecrire_plist_atomique(chemin_plist, contenu)
     # Décharge une version précédente ; échoue sans conséquence si rien n'est chargé.
     executer(["launchctl", "bootout", f"{domaine}/{LABEL}"], check=False, capture_output=True)
-    executer(["launchctl", "bootstrap", domaine, str(chemin_plist)], check=True, capture_output=True)
+    # `bootstrap` juste après un `bootout` échoue par intermittence (code 5 ou 37)
+    # tant que l'ancienne instance finit de se décharger : quelques essais suffisent.
+    for tentative in range(1, REESSAIS_BOOTSTRAP + 1):
+        try:
+            executer(
+                ["launchctl", "bootstrap", domaine, str(chemin_plist)],
+                check=True,
+                capture_output=True,
+            )
+            return
+        except subprocess.CalledProcessError as e:
+            if e.returncode not in CODES_BOOTSTRAP_TRANSITOIRES or tentative == REESSAIS_BOOTSTRAP:
+                raise
+            dormir(DELAI_REESSAI_BOOTSTRAP_S)
 
 
 def desinstaller_launch_agent(chemin_plist: Path, executer: Callable | None = None) -> None:
