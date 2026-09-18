@@ -131,6 +131,87 @@ async def test_bout_en_bout(dossier_court, tmp_path):
     assert not socket_.exists()
 
 
+async def test_bout_en_bout_rien_de_prive_ne_fuit(dossier_court, tmp_path, caplog):
+    """F8 : un marqueur porté par `prompt`, `tool_input` et `last_assistant_message`
+    (jetés à la réception, jamais gardés, cf. spec 7.3) et le nom d'un dossier non
+    autorisé ne doivent jamais apparaître, ni dans un enregistrement de log (message
+    ou arguments, tous les logueurs, au niveau DEBUG), ni dans un champ de la carte
+    publiée à Discord ; la carte d'un projet non autorisé se termine par « Projet
+    privé »."""
+    home = dossier_court
+    socket_ = home / ".local" / "state" / "discord-rich-claude" / "daemon.sock"
+    marqueur = "SECRET-MARQUEUR-9F3C"
+    nom_dossier_prive = "ProjetClientConfidentielXYZ"
+    dossier_prive = tmp_path / nom_dossier_prive
+    dossier_prive.mkdir()
+    config = tmp_path / "config.toml"
+    config.write_text('client_id = "42"\n[projets]\nautorises = []\n', encoding="utf-8")
+    projets_claude = tmp_path / "projects"
+    projets_claude.mkdir()
+
+    journal = []
+    presence = Presence(lambda cid: FauxClient(journal), intervalle_min_s=0, reessai_s=0)
+    daemon = Daemon(ConfigSurveillee(config), presence, SuiviTokens(projets_claude), projets_claude)
+    arret = asyncio.Event()
+
+    with caplog.at_level(logging.DEBUG):
+        tache = asyncio.create_task(daemon.executer(socket_, arret))
+        await attendre(socket_.exists)
+
+        await envoyer_hook(
+            home,
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": "s1",
+                "cwd": str(dossier_prive),
+                "prompt": marqueur,
+            },
+        )
+        await envoyer_hook(
+            home,
+            {
+                "hook_event_name": "PreToolUse",
+                "session_id": "s1",
+                "tool_name": "Edit",
+                "tool_input": {"content": marqueur},
+            },
+        )
+        await envoyer_hook(
+            home,
+            {
+                "hook_event_name": "Stop",
+                "session_id": "s1",
+                "last_assistant_message": marqueur,
+            },
+        )
+        await daemon.controler()
+
+        def carte_publiee():
+            return any(not isinstance(c, str) for c in journal)
+
+        await attendre(carte_publiee)
+
+        arret.set()
+        await asyncio.wait_for(tache, 5)
+
+    for record in caplog.records:
+        message = record.getMessage()
+        assert marqueur not in message
+        assert nom_dossier_prive not in message
+        for arg in record.args if isinstance(record.args, tuple) else ():
+            assert marqueur not in str(arg)
+            assert nom_dossier_prive not in str(arg)
+
+    cartes = [c for c in journal if not isinstance(c, str)]
+    assert cartes
+    for c in cartes:
+        assert marqueur not in c.details
+        assert marqueur not in c.state
+        assert nom_dossier_prive not in c.details
+        assert nom_dossier_prive not in c.state
+        assert c.details.endswith("Projet privé")
+
+
 async def test_client_id_absent_logge_une_erreur_au_demarrage_et_apres_rechargement(
     tmp_path, caplog
 ):
