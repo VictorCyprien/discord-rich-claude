@@ -191,3 +191,47 @@ def test_config_par_defaut_lien_symbolique_pendant_refuse_sans_toucher_la_cible(
     lien.symlink_to(cible)
     assert creer_config_par_defaut(lien) is False
     assert not cible.exists()
+
+
+# --- Task 12 : masquer_apres_min, masquage de la carte après une longue inactivité ---
+
+
+def test_masquer_apres_min_defaut(tmp_path):
+    assert charger(tmp_path / "absente.toml").masquer_apres_min == 60
+
+
+def test_masquer_apres_min_valeur_valide_lue(tmp_path):
+    f = ecrire(tmp_path / "c.toml", "masquer_apres_min = 30\n")
+    assert charger(f).masquer_apres_min == 30
+
+
+@pytest.mark.parametrize("valeur", [0, 1441])
+def test_masquer_apres_min_hors_bornes_1_1440(tmp_path, valeur):
+    f = ecrire(tmp_path / "c.toml", f"masquer_apres_min = {valeur}\n")
+    assert charger(f) == Config()
+
+
+@pytest.mark.parametrize("valeur", [1, 1440])
+def test_masquer_apres_min_aux_bornes_acceptee(tmp_path, valeur):
+    f = ecrire(tmp_path / "c.toml", f"masquer_apres_min = {valeur}\n")
+    assert charger(f).masquer_apres_min == valeur
+
+
+def test_masquer_apres_min_chaine_refuse_tout(tmp_path):
+    f = ecrire(tmp_path / "c.toml", 'masquer_apres_min = "60"\n')
+    assert charger(f) == Config()
+
+
+def test_masquer_apres_min_booleen_refuse_tout(tmp_path):
+    f = ecrire(tmp_path / "c.toml", "masquer_apres_min = true\n")
+    assert charger(f) == Config()
+
+
+def test_masquer_apres_min_non_fini_refuse_tout(tmp_path):
+    f = ecrire(tmp_path / "c.toml", "masquer_apres_min = nan\n")
+    assert charger(f) == Config()
+
+
+def test_masquer_apres_min_enorme_refuse_tout_sans_lever(tmp_path):
+    f = ecrire(tmp_path / "c.toml", f"masquer_apres_min = {10 ** 400}\n")
+    assert charger(f) == Config()

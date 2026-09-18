@@ -84,13 +84,21 @@ def est_vue_b(maintenant: float, rotation_s: float) -> bool:
 def construire_carte(
     registre: Registre, config: Config, stats: Stats, maintenant: float, vue_b: bool
 ) -> Carte | None:
-    session = registre.session_affichee()
-    if session is None:
+    # Masquage (décision de Victor, 2026-09-18) : une session sans événement depuis
+    # `masquer_apres_min` ne compte plus pour la carte, ni affichée ni comptée ni dans
+    # le chrono. Calculé sur ce sous-ensemble, jamais sur `registre.session_affichee()`
+    # / `registre.debut_plus_ancien()`, qui portent sur toutes les sessions vivantes.
+    masquer_apres_s = config.masquer_apres_min * 60
+    comptent = [
+        s for s in registre.sessions.values() if maintenant - s.dernier_evenement < masquer_apres_s
+    ]
+    if not comptent:
         return None
+    session = max(comptent, key=lambda s: s.dernier_evenement)
     activite = activite_affichee(session, maintenant, config.inactif_apres_min * 60)
     details = f"{activite} · {nom_projet(session.cwd, config.projets_autorises)}"
     if vue_b:
-        n = len(registre.sessions)
+        n = len(comptent)
         pluriel = "s" if n > 1 else ""
         state = f"{n} session{pluriel} · {formater_nombre(stats.tokens_jour)} aujourd'hui"
     else:
@@ -100,5 +108,7 @@ def construire_carte(
     # Discord refuse toute mise à jour dont `details` ou `state` dépasse 128
     # caractères (déconnexion, puis nouvel essai toutes les 15 s).
     return Carte(
-        details=_tronquer(details), state=_tronquer(state), debut=int(registre.debut_plus_ancien())
+        details=_tronquer(details),
+        state=_tronquer(state),
+        debut=int(min(s.debut for s in comptent)),
     )

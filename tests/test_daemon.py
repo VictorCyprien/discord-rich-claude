@@ -10,6 +10,7 @@ from discord_rich_claude.chemins import COMMANDE_HOOK
 from discord_rich_claude.config import ConfigSurveillee
 from discord_rich_claude.daemon import Daemon, configurer_logs
 from discord_rich_claude.presence import Presence
+from discord_rich_claude.sessions import Evenement
 from discord_rich_claude.tokens import SuiviTokens
 
 
@@ -287,6 +288,41 @@ async def test_boucle_ne_repete_pas_la_meme_erreur_et_signale_le_retablissement(
         assert not r.exc_info
 
     assert any(r.exc_info and marqueur in str(r.exc_info[1]) for r in debogages)
+
+
+# --- Task 12 : masquer la carte après une longue inactivité (masquer_apres_min) ---
+
+
+async def test_carte_effacee_apres_masquage_puis_revient_avec_son_debut_dorigine(tmp_path):
+    config = tmp_path / "config.toml"
+    config.write_text('client_id = "42"\nmasquer_apres_min = 1\n', encoding="utf-8")
+    projets_claude = tmp_path / "projects"
+    projets_claude.mkdir()
+    journal = []
+    presence = Presence(lambda cid: FauxClient(journal), intervalle_min_s=0, reessai_s=0)
+    horloge = {"t": 0.0}
+    daemon = Daemon(
+        ConfigSurveillee(config),
+        presence,
+        SuiviTokens(projets_claude),
+        projets_claude,
+        horloge=lambda: horloge["t"],
+    )
+    daemon.recevoir(Evenement("SessionStart", "s1", horloge["t"]))
+    assert daemon.carte() is not None
+    await daemon.presence.soumettre(daemon.carte(), daemon.config.valeur.client_id)
+    assert "connecter" in journal  # la présence se connecte tant qu'une session compte
+
+    horloge["t"] = 61.0  # masquer_apres_min (1 min) dépassé depuis le dernier événement
+    assert daemon.carte() is None
+    await daemon.presence.soumettre(daemon.carte(), daemon.config.valeur.client_id)
+    assert "effacer" in journal
+
+    horloge["t"] = 62.0
+    daemon.recevoir(Evenement("PreToolUse", "s1", horloge["t"], tool_name="Edit"))
+    carte = daemon.carte()
+    assert carte is not None
+    assert carte.debut == 0  # début d'origine de la session, pas réinitialisé
 
 
 def test_drc_log_invalide_replie_sur_info_avec_avertissement(monkeypatch, tmp_path, caplog):

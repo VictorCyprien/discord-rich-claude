@@ -176,3 +176,45 @@ def test_state_tronque_a_128_caracteres():
     carte = construire_carte(r, Config(), Stats(modele=modele_long), 1001, vue_b=False)
     assert len(carte.state) == 128
     assert carte.state.endswith("…")
+
+
+# --- Task 12 : masquer la carte après une longue inactivité (masquer_apres_min) ---
+
+
+def test_session_compte_juste_avant_le_masquage():
+    r = registre(("s1", 1000, None))
+    carte = construire_carte(r, Config(), Stats(), 1000 + 59 * 60, vue_b=False)
+    assert carte is not None
+
+
+def test_session_masquee_a_lheure():
+    r = registre(("s1", 1000, None))
+    carte = construire_carte(r, Config(), Stats(), 1000 + 60 * 60, vue_b=False)
+    assert carte is None
+
+
+def test_deux_sessions_une_masquee_compteur_et_chrono_sur_celle_qui_compte():
+    r = registre(("ancienne", 500, None), ("recente", 1000, None))
+    maintenant = 500 + 61 * 60  # "ancienne" masquée (dernier événement à 500), "recente" non
+    carte = construire_carte(r, Config(), Stats(), maintenant, vue_b=True)
+    assert carte.state.startswith("1 session ")
+    assert carte.debut == 1000
+
+
+def test_session_masquee_recompte_apres_evenement_avec_son_debut_dorigine():
+    r = registre(("ancienne", 500, None), ("recente", 1000, None))
+    maintenant = 500 + 61 * 60
+    carte = construire_carte(r, Config(), Stats(), maintenant, vue_b=True)
+    assert carte.debut == 1000  # "ancienne" masquée : seule "recente" compte
+
+    r.appliquer(Evenement("PreToolUse", "ancienne", maintenant, tool_name="Edit"))
+    carte = construire_carte(r, Config(), Stats(), maintenant, vue_b=True)
+    assert carte.state.startswith("2 sessions ")
+    assert carte.debut == 500  # "ancienne" redevient la plus ancienne qui compte, avec son début d'origine
+
+
+def test_masquer_apres_min_inferieur_a_inactif_apres_min_masque_sans_erreur():
+    r = registre(("s1", 1000, None))
+    cfg = Config(masquer_apres_min=5, inactif_apres_min=10)
+    carte = construire_carte(r, cfg, Stats(), 1000 + 6 * 60, vue_b=False)
+    assert carte is None

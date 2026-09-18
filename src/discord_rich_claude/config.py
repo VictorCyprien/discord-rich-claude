@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 class Config:
     client_id: str | None = None
     inactif_apres_min: float = 10
+    masquer_apres_min: float = 60
     rotation_s: float = 20
     projets_autorises: tuple[Path, ...] = ()
 
@@ -61,6 +62,7 @@ def _valider(brut: dict) -> Config:
     return Config(
         client_id=str(cid) if cid not in (None, "") else None,
         inactif_apres_min=_borne(brut.get("inactif_apres_min", 10), "inactif_apres_min", 1, 1440),
+        masquer_apres_min=_borne(brut.get("masquer_apres_min", 60), "masquer_apres_min", 1, 1440),
         rotation_s=_borne(brut.get("rotation_s", 20), "rotation_s", 5, 3600),
         projets_autorises=tuple(chemins),
     )
@@ -109,6 +111,7 @@ CONFIG_PAR_DEFAUT = """\
 # ID de l'application Discord : Developer Portal > General Information > Application ID.
 client_id = ""
 inactif_apres_min = 10
+masquer_apres_min = 60
 rotation_s = 20
 
 [projets]
