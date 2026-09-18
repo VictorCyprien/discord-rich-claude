@@ -1,0 +1,23 @@
+[project]
+name = "discord-rich-claude"
+version = "0.1.0"
+description = "Discord Rich Presence pour Claude Code, pilotée par les hooks"
+requires-python = ">=3.12"
+dependencies = ["pypresence>=4.6.2,<5"]
+
+[project.scripts]
+discord-rich-claude = "discord_rich_claude.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=9", "pytest-asyncio>=1.4"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/discord_rich_claude"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
