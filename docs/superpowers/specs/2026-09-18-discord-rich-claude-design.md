@@ -4,7 +4,7 @@ Date : 2026-09-18 · Statut : validé en brainstorming, en attente de relecture
 
 ## 1. Objectif
 
-Quand une session Claude Code tourne sur la machine, le profil Discord affiche une carte « Joue à Claude Code » avec l'activité en cours, le modèle, les tokens et la durée. Le nom du projet n'apparaît que pour les projets explicitement autorisés.
+Quand une session Claude Code tourne sur la machine, le profil Discord affiche une carte « Joue à ClaudeCode » avec l'activité en cours, le modèle, les tokens et la durée. Le nom du projet n'apparaît que pour les projets explicitement autorisés.
 
 Usage personnel, macOS, Discord desktop installé.
 
@@ -210,7 +210,7 @@ Noms de fichiers, commandes, prompts, branche git, chemins. Un nom de projet uni
 |---|---|
 | Discord fermé ou redémarré | Tant qu'une session est vivante, nouvel essai toutes les 15 s ; la carte courante est envoyée dès la reconnexion |
 | Daemon arrêté | `curl` échoue sans bruit, Claude n'est pas gêné ; le LaunchAgent relance le daemon, l'état se reconstruit (4.1) |
-| Ligne de transcript illisible | Ignorée, notée dans le log |
+| Ligne de transcript illisible | Ignorée ; notée dans le log si elle porte `usage` ou `model` (les autres lignes ne sont pas analysées) |
 | Erreur sur un événement | Notée dans le log, le daemon continue |
 | Config invalide | Refus par défaut (7.1) |
 

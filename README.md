@@ -1,6 +1,6 @@
 # discord-rich-claude
 
-Affiche sur ton profil Discord une carte « Joue à Claude Code » quand une session Claude Code tourne : activité en cours, modèle, tokens, durée. Le nom du projet n'apparaît que pour les dossiers que tu autorises.
+Affiche sur ton profil Discord une carte « Joue à ClaudeCode » quand une session Claude Code tourne : activité en cours, modèle, tokens, durée. Le nom du projet n'apparaît que pour les dossiers que tu autorises.
 
 Tout reste local : les hooks de Claude Code parlent au daemon par un socket Unix, le daemon parle à Discord par sa connexion locale. Aucune donnée ne part sur le réseau.
 
@@ -71,7 +71,7 @@ launchctl kickstart -k gui/$(id -u)/local.discord-rich-claude
 
 ## Dépannage
 
-- Log : `~/Library/Logs/discord-rich-claude/daemon.log` (tourne automatiquement). Plus de détail : `DRC_LOG=DEBUG discord-rich-claude run` après `launchctl bootout gui/$(id -u)/local.discord-rich-claude`. Le LaunchAgent écrit aussi `launchd.out.log` et `launchd.err.log` dans le même dossier. Pour revenir à l'agent après ce `run` manuel : `launchctl kickstart -k gui/$(id -u)/local.discord-rich-claude`.
+- Log : `~/Library/Logs/discord-rich-claude/daemon.log` (tourne automatiquement). Plus de détail : `DRC_LOG=DEBUG discord-rich-claude run` après `launchctl bootout gui/$(id -u)/local.discord-rich-claude`. Le LaunchAgent écrit aussi `launchd.out.log` et `launchd.err.log` dans le même dossier. Pour revenir à l'agent après ce `run` manuel : `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.discord-rich-claude.plist`.
 - `discord-rich-claude run` lancé à la main pendant que le LaunchAgent tourne déjà affiche « un daemon tourne déjà sur … » et s'arrête : c'est attendu, l'agent occupe déjà le socket.
 - La carte n'apparaît jamais après l'ouverture de session : vérifie la ligne « exécutable : … » affichée par `install` (section Installation) — un chemin sous `/Volumes/` ou un `.venv` signale un mauvais binaire enregistré dans le LaunchAgent, à corriger en réinstallant depuis un terminal classique.
 - Pas de carte (daemon actif, bon exécutable) : vérifie `client_id`, que Discord desktop tourne, et Paramètres Discord > Confidentialité de l'activité > « Partager mon activité ».

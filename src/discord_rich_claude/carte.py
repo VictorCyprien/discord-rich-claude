@@ -1,4 +1,4 @@
-"""Construction de la carte Discord. Fonctions pures. Voir la spec, section 5."""
+"""Construction de la carte Discord. Fonctions pures, sauf la résolution des dossiers de projet, mise en cache. Voir la spec, section 5."""
 import functools
 import re
 from dataclasses import dataclass
