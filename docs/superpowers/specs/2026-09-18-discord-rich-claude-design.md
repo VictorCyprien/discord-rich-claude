@@ -106,7 +106,7 @@ Quand la liste des sous-agents se vide, la carte revient à l'activité du fil p
 
 ```
 JOUE À
-Claude Code
+ClaudeCode
 [logo]  Écrit du code · DiscordRichClaude       ← details
         Opus 5 · 445 k tokens                    ← state, vue A
         01:23:45 écoulé                          ← timestamps.start
@@ -116,7 +116,7 @@ Claude Code
         3 sessions · 8,4 M aujourd'hui           ← state, vue B
 ```
 
-- Titre : nom de l'application Discord créée par Victor (« Claude Code »). Logo : image de l'application, clé d'asset `logo`.
+- Titre : nom de l'application Discord créée par Victor sur le Developer Portal. Le Portal refuse un nom avec une espace (erreur 50277, testé avec « Claude Code ») : le nom réel est `ClaudeCode` ou `Claude·Code`. Logo : image de l'application, clé d'asset `logo`.
 - `details` : activité (4.3), puis ` · <projet>` si le dossier est autorisé, sinon ` · Projet privé`.
 - `state`, vue A : `<modèle> · <tokens session> tokens`.
 - `state`, vue B : `<N> session(s) · <cumul du jour> aujourd'hui`.
@@ -199,7 +199,7 @@ Noms de fichiers, commandes, prompts, branche git, chemins. Un nom de projet uni
   ```
 
   Hook synchrone, `timeout: 2`. `PreToolUse` avec le matcher `*`.
-- Étape manuelle, documentée dans le README : créer l'application « Claude Code » sur le Developer Portal de Discord, y déposer le logo sous la clé `logo`, copier l'Application ID dans `client_id`.
+- Étape manuelle, documentée dans le README : créer l'application sur le Developer Portal de Discord avec un nom sans espace (le Portal refuse une espace, erreur 50277 ; ex. `ClaudeCode` ou `Claude·Code`), y déposer le logo sous la clé `logo`, copier l'Application ID dans `client_id`.
 
 ## 9. Pannes et reprises
 
