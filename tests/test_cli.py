@@ -1,5 +1,7 @@
 import logging
 
+import pytest
+
 from discord_rich_claude import chemins, cli
 
 
@@ -44,3 +46,50 @@ def test_erreur_demarrage_os_error_retourne_1_logge_et_imprime_sans_trace(
     sortie = capsys.readouterr()
     assert "Traceback" not in sortie.err
     assert "PermissionError" in sortie.err
+
+
+# --- install, uninstall, status (Task 10) ---
+
+
+def test_status_sans_daemon(monkeypatch, capsys, dossier_court):
+    monkeypatch.setattr(cli.chemins, "SOCKET", dossier_court / "absent.sock")
+    assert cli.main(["status"]) == 1
+    assert "injoignable" in capsys.readouterr().out
+
+
+def test_status_avec_daemon(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "interroger_etat", lambda chemin: {"discord": True, "sessions": 2})
+    assert cli.main(["status"]) == 0
+    sortie = capsys.readouterr().out
+    assert "connecté" in sortie and "2" in sortie
+
+
+def test_commande_inconnue():
+    with pytest.raises(SystemExit):
+        cli.main(["inconnue"])
+
+
+def test_install_settings_invalide_imprime_sur_stderr_sans_trace_et_retourne_1(monkeypatch, capsys):
+    """installation.modifier_settings peut lever ValueError (JSON invalide, forme de
+    hooks non éditable, ou modification concurrente détectée à la relecture) : `install`
+    doit l'annoncer sur stderr sans trace et ne rien avoir tenté d'autre ensuite."""
+
+    def leve(*a, **kw):
+        raise ValueError("settings.json a changé pendant la confirmation : relance la commande")
+
+    monkeypatch.setattr(cli, "modifier_settings", leve)
+    assert cli.main(["install"]) == 1
+    sortie = capsys.readouterr()
+    assert "Traceback" not in sortie.err
+    assert "relance la commande" in sortie.err
+
+
+def test_uninstall_settings_invalide_imprime_sur_stderr_sans_trace_et_retourne_1(monkeypatch, capsys):
+    def leve(*a, **kw):
+        raise ValueError("settings['hooks'] doit être un objet")
+
+    monkeypatch.setattr(cli, "modifier_settings", leve)
+    assert cli.main(["uninstall"]) == 1
+    sortie = capsys.readouterr()
+    assert "Traceback" not in sortie.err
+    assert "doit être un objet" in sortie.err

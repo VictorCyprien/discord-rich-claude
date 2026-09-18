@@ -11,13 +11,15 @@ import copy
 import difflib
 import json
 import os
+import plistlib
 import stat
+import subprocess
 import tempfile
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from .chemins import COMMANDE_HOOK
+from .chemins import COMMANDE_HOOK, LABEL
 
 MARQUEUR = "discord-rich-claude"
 EVENEMENTS_HOOKS = (
@@ -162,3 +164,35 @@ def modifier_settings(
             pass
         raise
     return "modifié"
+
+
+def generer_plist(executable: str, dossier_logs: Path) -> bytes:
+    return plistlib.dumps(
+        {
+            "Label": LABEL,
+            "ProgramArguments": [executable, "run"],
+            "RunAtLoad": True,
+            "KeepAlive": True,
+            "ProcessType": "Background",
+            "StandardOutPath": str(dossier_logs / "launchd.out.log"),
+            "StandardErrorPath": str(dossier_logs / "launchd.err.log"),
+        }
+    )
+
+
+def installer_launch_agent(
+    chemin_plist: Path, contenu: bytes, executer: Callable = subprocess.run
+) -> None:
+    domaine = f"gui/{os.getuid()}"
+    # Décharge une version précédente ; échoue sans conséquence si rien n'est chargé.
+    executer(["launchctl", "bootout", f"{domaine}/{LABEL}"], check=False, capture_output=True)
+    chemin_plist.parent.mkdir(parents=True, exist_ok=True)
+    chemin_plist.write_bytes(contenu)
+    executer(["launchctl", "bootstrap", domaine, str(chemin_plist)], check=True, capture_output=True)
+
+
+def desinstaller_launch_agent(chemin_plist: Path, executer: Callable = subprocess.run) -> None:
+    executer(
+        ["launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"], check=False, capture_output=True
+    )
+    chemin_plist.unlink(missing_ok=True)

@@ -97,3 +97,24 @@ class ConfigSurveillee:
         self._mtime = mtime
         self.valeur = charger(self.chemin)
         return True
+
+
+CONFIG_PAR_DEFAUT = """\
+# Configuration de discord-rich-claude.
+# ID de l'application Discord : Developer Portal > General Information > Application ID.
+client_id = ""
+inactif_apres_min = 10
+rotation_s = 20
+
+[projets]
+# Refusé par défaut : seuls ces dossiers (chemins complets) affichent leur nom.
+autorises = []
+"""
+
+
+def creer_config_par_defaut(chemin: Path) -> bool:
+    if chemin.exists():
+        return False
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    chemin.write_text(CONFIG_PAR_DEFAUT, encoding="utf-8")
+    return True

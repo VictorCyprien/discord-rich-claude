@@ -1,13 +1,18 @@
 import json
+import os
+import plistlib
 import stat
 from datetime import datetime
 
 import pytest
 
-from discord_rich_claude.chemins import COMMANDE_HOOK
+from discord_rich_claude.chemins import COMMANDE_HOOK, LABEL
 from discord_rich_claude.installation import (
     EVENEMENTS_HOOKS,
     ajouter_hooks,
+    desinstaller_launch_agent,
+    generer_plist,
+    installer_launch_agent,
     modifier_settings,
     retirer_hooks,
 )
@@ -259,3 +264,37 @@ def test_ajouter_preserve_un_groupe_malforme_sans_planter():
     groupes = resultat["hooks"]["Stop"]
     assert {"hooks": None} in groupes
     assert {"hooks": [{"type": "command", "command": COMMANDE_HOOK, "timeout": 2}]} in groupes
+
+
+# --- LaunchAgent (Task 10) ---
+
+
+def test_generer_plist(tmp_path):
+    plist = plistlib.loads(generer_plist("/u/bin/discord-rich-claude", tmp_path))
+    assert plist["Label"] == LABEL
+    assert plist["ProgramArguments"] == ["/u/bin/discord-rich-claude", "run"]
+    assert plist["RunAtLoad"] is True
+    assert plist["KeepAlive"] is True
+    assert plist["StandardErrorPath"] == str(tmp_path / "launchd.err.log")
+
+
+def test_installer_launch_agent(tmp_path):
+    appels = []
+    chemin = tmp_path / "LaunchAgents" / f"{LABEL}.plist"
+    installer_launch_agent(chemin, b"<plist/>", executer=lambda cmd, **kw: appels.append(cmd))
+    domaine = f"gui/{os.getuid()}"
+    assert chemin.read_bytes() == b"<plist/>"
+    assert appels == [
+        ["launchctl", "bootout", f"{domaine}/{LABEL}"],
+        ["launchctl", "bootstrap", domaine, str(chemin)],
+    ]
+
+
+def test_desinstaller_launch_agent(tmp_path):
+    appels = []
+    chemin = tmp_path / f"{LABEL}.plist"
+    chemin.write_bytes(b"<plist/>")
+    desinstaller_launch_agent(chemin, executer=lambda cmd, **kw: appels.append(cmd))
+    assert not chemin.exists()
+    assert appels == [["launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"]]
+    desinstaller_launch_agent(chemin, executer=lambda cmd, **kw: None)  # déjà absent : pas d'erreur

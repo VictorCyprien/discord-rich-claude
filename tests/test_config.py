@@ -1,6 +1,6 @@
 import os
 
-from discord_rich_claude.config import Config, ConfigSurveillee, charger
+from discord_rich_claude.config import Config, ConfigSurveillee, charger, creer_config_par_defaut
 
 
 def ecrire(chemin, texte):
@@ -111,3 +111,19 @@ def test_rechargement_quand_le_fichier_disparait(tmp_path):
     f.unlink()
     assert cs.recharger_si_change() is True
     assert cs.valeur == Config()
+
+
+# --- Config par défaut (Task 10) ---
+
+
+def test_config_par_defaut_creee_et_refuse_tout(tmp_path):
+    f = tmp_path / "sous" / "config.toml"
+    assert creer_config_par_defaut(f) is True
+    assert charger(f) == Config()
+
+
+def test_config_par_defaut_n_ecrase_pas(tmp_path):
+    f = tmp_path / "config.toml"
+    f.write_text('client_id = "1"\n', encoding="utf-8")
+    assert creer_config_par_defaut(f) is False
+    assert f.read_text(encoding="utf-8") == 'client_id = "1"\n'
