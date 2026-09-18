@@ -24,6 +24,7 @@ Tout reste local : les hooks de Claude Code parlent au daemon par un socket Unix
    ```toml
    client_id = "ton Application ID"
    inactif_apres_min = 10
+   masquer_apres_min = 60
    rotation_s = 20
 
    [projets]
@@ -31,6 +32,8 @@ Tout reste local : les hooks de Claude Code parlent au daemon par un socket Unix
    ```
 
    La config est relue toute seule quand elle change. Sans `client_id`, le daemon journalise une seule erreur (« client_id absent : pas de connexion à Discord ») et n'affiche rien.
+
+   `masquer_apres_min` (défaut 60 min) : la carte disparaît après une heure sans activité, plutôt que de rester coincée sur « Inactif » toute la nuit.
 
    Dans Discord, active Paramètres > Confidentialité de l'activité > « Partager mon activité ».
 

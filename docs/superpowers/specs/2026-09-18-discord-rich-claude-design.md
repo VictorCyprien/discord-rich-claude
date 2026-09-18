@@ -97,7 +97,7 @@ Quand la liste des sous-agents se vide, la carte revient à l'activité du fil p
 ### 4.5 Plusieurs sessions
 
 - Session affichée : celle dont le dernier événement est le plus récent.
-- Compteur : nombre de sessions vivantes.
+- Compteur : nombre de sessions vivantes qui comptent pour la carte (voir « Masquage » ci-dessous).
 - Tokens de la session : ceux de la session affichée.
 - Cumul du jour : toutes les sessions, depuis minuit heure locale.
 - Zéro session vivante : la carte est effacée et la connexion à Discord fermée.
@@ -120,12 +120,14 @@ ClaudeCode
 - `details` : activité (4.3), puis ` · <projet>` si le dossier est autorisé, sinon ` · Projet privé`.
 - `state`, vue A : `<modèle> · <tokens session> tokens`.
 - `state`, vue B : `<N> session(s) · <cumul du jour> aujourd'hui`.
-- Chrono : heure de début de la plus ancienne session vivante. Il ne saute pas quand la carte change de session. Après un redémarrage du daemon, le début d'une session reconstruite est l'heure du premier événement reçu.
+- Chrono : heure de début de la plus ancienne session qui compte pour la carte. Il ne saute pas quand la carte change de session. Après un redémarrage du daemon, le début d'une session reconstruite est l'heure du premier événement reçu.
 - Libellés en français, codés en dur.
 - Formats de nombre : `< 1 000` tel quel (`850`), `< 1 000 000` en milliers (`445 k`), au-delà en millions avec une décimale et virgule (`1,2 M`).
 - Nom du modèle : `claude-(opus|sonnet|haiku|fable)-X[-Y][-AAAAMMJJ]` → `<Famille> X` ou `<Famille> X.Y` (`claude-opus-5` → `Opus 5`, `claude-haiku-4-5-20251001` → `Haiku 4.5`). Identifiant inconnu : affiché sans le préfixe `claude-`. Modèle absent : vue A sans modèle.
 
 Envoi à Discord : seulement si la carte a changé, et pas plus d'une fois par intervalle minimal. La valeur de cet intervalle dépend de la limite de fréquence de Discord, vérifiée en L1 ; les mises à jour d'une rafale sont regroupées, la dernière gagne.
+
+Masquage : une session sans aucun événement (fil principal ou sous-agent) depuis `masquer_apres_min` (défaut 60) ne compte plus pour la carte : ni affichée, ni comptée, ni dans le chrono. Elle reste suivie tant que son processus vit et recompte au premier événement. Quand aucune session ne compte, la carte est effacée. Décision de Victor, 2026-09-18.
 
 ## 6. Tokens et modèle
 
@@ -146,6 +148,7 @@ Envoi à Discord : seulement si la carte a changé, et pas plus d'une fois par i
 ```toml
 client_id = "1234567890"      # ID de l'application Discord
 inactif_apres_min = 10
+masquer_apres_min = 60
 rotation_s = 20
 
 [projets]
