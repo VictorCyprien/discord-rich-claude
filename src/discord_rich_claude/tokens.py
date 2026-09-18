@@ -27,8 +27,11 @@ class Entree:
 
 
 def minuit_local(maintenant: float) -> float:
-    d = datetime.fromtimestamp(maintenant).astimezone()
-    return d.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    # Naïf : .timestamp() résout alors avec le décalage de minuit lui-même,
+    # pas celui de "maintenant" (les deux diffèrent un jour de changement
+    # d'heure).
+    d = datetime.fromtimestamp(maintenant).replace(hour=0, minute=0, second=0, microsecond=0)
+    return d.timestamp()
 
 
 def fichiers_de_session(transcript: Path) -> list[Path]:
@@ -104,6 +107,9 @@ class Fichier:
                 bloc = f.read()
         except FileNotFoundError:
             return []
+        except OSError:
+            log.warning("fichier illisible ignoré : %s", self.chemin.name)
+            return []
         fin = bloc.rfind(b"\n")
         if fin < 0:
             return []
@@ -153,6 +159,8 @@ class SuiviTokens:
                     voulus.add(chemin)
             except FileNotFoundError:
                 pass
+            except OSError:
+                log.warning("fichier illisible ignoré : %s", chemin.name)
         for chemin in list(self._fichiers):
             if chemin not in voulus:
                 del self._fichiers[chemin]

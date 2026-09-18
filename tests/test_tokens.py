@@ -1,7 +1,9 @@
 import json
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from discord_rich_claude.tokens import SuiviTokens, fichiers_de_session, minuit_local
 
@@ -152,3 +154,62 @@ def test_minuit_local():
     d = datetime.fromtimestamp(m)
     assert (d.hour, d.minute, d.second) == (0, 0, 0)
     assert timedelta(0) <= datetime.fromtimestamp(MAINTENANT) - d < timedelta(hours=25)
+
+
+@pytest.fixture
+def tz_paris():
+    """Force le fuseau Europe/Paris pour la durée du test, restauré ensuite.
+
+    Restauration manuelle (plutôt que monkeypatch.setenv) : monkeypatch ne
+    rappelle jamais time.tzset() après avoir annulé la variable TZ, ce qui
+    laisserait le fuseau du process bloqué sur Europe/Paris pour les tests
+    suivants. Ici la restauration de TZ et le second tzset() sont dans le
+    même bloc, sans dépendre de l'ordre de démontage d'une autre fixture.
+    """
+    original = os.environ.get("TZ")
+    os.environ["TZ"] = "Europe/Paris"
+    time.tzset()
+    try:
+        yield
+    finally:
+        if original is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = original
+        time.tzset()
+
+
+def test_minuit_local_passage_heure_ete(tz_paris):
+    # 2026-03-29 : passage à l'heure d'été à 02h00 -> 03h00 local. Minuit est
+    # encore à l'ancien décalage (CET, UTC+1), pas celui de "maintenant" (CEST, UTC+2).
+    maintenant = datetime(2026, 3, 29, 14, 0, 0).timestamp()
+    attendu = datetime(2026, 3, 28, 23, 0, 0, tzinfo=timezone.utc).timestamp()
+    assert minuit_local(maintenant) == attendu
+
+
+def test_minuit_local_passage_heure_hiver(tz_paris):
+    # 2026-10-25 : passage à l'heure d'hiver à 03h00 -> 02h00 local. Minuit est
+    # encore à l'ancien décalage (CEST, UTC+2), pas celui de "maintenant" (CET, UTC+1).
+    maintenant = datetime(2026, 10, 25, 14, 0, 0).timestamp()
+    attendu = datetime(2026, 10, 24, 22, 0, 0, tzinfo=timezone.utc).timestamp()
+    assert minuit_local(maintenant) == attendu
+
+
+def test_minuit_local_jour_ordinaire_tz_paris(tz_paris):
+    maintenant = datetime(2026, 1, 15, 10, 0, 0).timestamp()
+    attendu = datetime(2026, 1, 14, 23, 0, 0, tzinfo=timezone.utc).timestamp()
+    assert minuit_local(maintenant) == attendu
+
+
+def test_fichier_illisible_ignore_les_autres_restent_comptes(tmp_path):
+    if os.geteuid() == 0:
+        pytest.skip("chmod sans effet pour root")
+    lisible = session(tmp_path, sid="s1", lignes=[ligne("m1", out=5)])
+    illisible = session(tmp_path, sid="s2", lignes=[ligne("m2", out=9)])
+    illisible.chmod(0o000)
+    try:
+        suivi = SuiviTokens(tmp_path)
+        suivi.rafraichir([lisible, illisible], MINUIT)
+        assert suivi.tokens_session(lisible) == 5
+    finally:
+        illisible.chmod(0o644)
