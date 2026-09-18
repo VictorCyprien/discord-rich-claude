@@ -5,9 +5,12 @@ import os
 import shutil
 import struct
 import tempfile
+import time
+from contextlib import suppress
 
 import pytest
 
+import discord_rich_claude.presence as presence_module
 from discord_rich_claude.carte import Carte
 from discord_rich_claude.presence import ClientPypresence, Presence
 
@@ -239,3 +242,109 @@ async def test_fermeture_echouee_loggee_en_warning(caplog):
     assert len(avertissements) == 1
     assert "BrokenPipeError" in avertissements[0].getMessage()
     assert "pipe fermé" not in avertissements[0].getMessage()
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
+async def test_connecter_sans_reponse_expire_et_ferme_le_socket(monkeypatch):
+    """G4 : pypresence 4.6.2 borne l'ouverture du socket mais pas la lecture de la
+    réponse à la poignée de main (BaseClient.handshake). Un pair qui accepte la
+    connexion sans jamais répondre ne doit pas bloquer connecter() indéfiniment, et le
+    socket doit être refermé de notre côté (le serveur voit un EOF).
+
+    Le filtre ignore le même avertissement propre à pypresence 4.6.2 que
+    `test_client_pypresence_ferme_sans_fermer_la_boucle` (get_ipc_path() sonde la
+    connectivité du socket trouvé par scandir avant handshake() ; sous -W error,
+    l'itérateur scandir non fermé de la librairie tierce lève une erreur à sa
+    finalisation). Sans rapport avec ce correctif."""
+    monkeypatch.setattr(presence_module, "DELAI_POIGNEE_MAIN_S", 0.2)
+    dossier = tempfile.mkdtemp(dir="/tmp")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", dossier)
+    chemin_socket = os.path.join(dossier, "discord-ipc-0")
+    fermeture = asyncio.Event()
+    recu = []
+
+    async def gerer_connexion(reader, writer):
+        try:
+            try:
+                entete = await reader.readexactly(8)
+            except asyncio.IncompleteReadError:
+                return  # sonde de connectivité de get_ipc_path, pas la poignée de main
+            _, longueur = struct.unpack("<II", entete)
+            await reader.readexactly(longueur)
+            try:
+                fin = await reader.read(1)  # ne répond jamais : attend que le client ferme
+            except (asyncio.IncompleteReadError, ConnectionError):
+                fin = b""
+            recu.append(fin)
+            fermeture.set()
+        finally:
+            writer.close()
+
+    serveur = await asyncio.start_unix_server(gerer_connexion, path=chemin_socket)
+    try:
+        client = ClientPypresence("42")
+        debut = time.monotonic()
+        with pytest.raises(Exception):
+            await client.connecter()
+        duree = time.monotonic() - debut
+        await asyncio.wait_for(fermeture.wait(), timeout=2)
+    finally:
+        serveur.close()
+        # Si le socket n'a pas été refermé côté client, la connexion acceptée reste
+        # ouverte et wait_closed() ne revient jamais (Python 3.12) : on la borne pour
+        # que l'absence du correctif se traduise par un échec net, pas un blocage.
+        with suppress(TimeoutError):
+            await asyncio.wait_for(serveur.wait_closed(), timeout=2)
+        shutil.rmtree(dossier, ignore_errors=True)
+
+    assert duree < 2  # borné par DELAI_POIGNEE_MAIN_S (0,2 s ici), pas connection_timeout=5
+    assert recu == [b""]
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
+async def test_connecter_id_invalide_leve_et_ferme_le_socket(monkeypatch):
+    """G4 : un pair qui répond par une trame d'erreur (ID de client invalide) puis
+    garde le tuyau ouvert ne doit pas fuir le descripteur : connecter() referme le
+    socket de son côté avant de relever, le serveur voit un EOF.
+
+    Même filtre que ci-dessus, pour le même avertissement propre à pypresence 4.6.2,
+    sans rapport avec ce correctif."""
+    dossier = tempfile.mkdtemp(dir="/tmp")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", dossier)
+    chemin_socket = os.path.join(dossier, "discord-ipc-0")
+    fermeture = asyncio.Event()
+    recu = []
+
+    async def gerer_connexion(reader, writer):
+        try:
+            try:
+                entete = await reader.readexactly(8)
+            except asyncio.IncompleteReadError:
+                return  # sonde de connectivité de get_ipc_path, pas la poignée de main
+            _, longueur = struct.unpack("<II", entete)
+            await reader.readexactly(longueur)
+            erreur = json.dumps({"code": 4000, "message": "Invalid Client ID"}).encode()
+            writer.write(struct.pack("<II", 1, len(erreur)) + erreur)
+            await writer.drain()
+            try:
+                fin = await reader.read(1)
+            except (asyncio.IncompleteReadError, ConnectionError):
+                fin = b""
+            recu.append(fin)
+            fermeture.set()
+        finally:
+            writer.close()
+
+    serveur = await asyncio.start_unix_server(gerer_connexion, path=chemin_socket)
+    try:
+        client = ClientPypresence("42")
+        with pytest.raises(Exception):
+            await client.connecter()
+        await asyncio.wait_for(fermeture.wait(), timeout=2)
+    finally:
+        serveur.close()
+        with suppress(TimeoutError):
+            await asyncio.wait_for(serveur.wait_closed(), timeout=2)
+        shutil.rmtree(dossier, ignore_errors=True)
+
+    assert recu == [b""]

@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import logging
 import signal
+import sys
 
 from . import chemins
 from .config import ConfigSurveillee
@@ -34,6 +35,19 @@ def lancer() -> int:
         asyncio.run(principal())
     except DejaLance:
         log.error("un daemon tourne déjà sur %s", chemins.SOCKET)
+        print(f"discord-rich-claude : un daemon tourne déjà sur {chemins.SOCKET}", file=sys.stderr)
+        return 1
+    except OSError as e:
+        # PermissionError (dossier d'état invalide), ou toute autre erreur système au
+        # démarrage : une ligne dans le log et sur stderr, jamais la trace complète —
+        # sous le LaunchAgent (KeepAlive), une trace deviendrait une boucle de crash
+        # écrite en continu dans un fichier non tourné.
+        log.error("démarrage impossible (%s), socket %s", type(e).__name__, chemins.SOCKET)
+        print(
+            f"discord-rich-claude : démarrage impossible ({type(e).__name__}), "
+            f"socket {chemins.SOCKET}",
+            file=sys.stderr,
+        )
         return 1
     return 0
 

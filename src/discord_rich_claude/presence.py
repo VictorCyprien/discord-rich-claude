@@ -1,4 +1,5 @@
 """Connexion à Discord : publication à débit limité, reconnexion. Voir la spec, sections 4.5, 5 et 9."""
+import asyncio
 import logging
 import math
 import time
@@ -16,6 +17,12 @@ log = logging.getLogger(__name__)
 INTERVALLE_MIN_S = 15.0
 REESSAI_S = 15.0
 
+# pypresence 4.6.2 borne l'ouverture du socket (`connection_timeout`) mais pas la
+# lecture de la réponse à la poignée de main (`BaseClient.handshake`, `sock_reader.read`
+# sans timeout) : un pair qui accepte la connexion sans jamais répondre bloque
+# indéfiniment `connecter`, donc toute la boucle carte à 1 s. On borne nous-mêmes.
+DELAI_POIGNEE_MAIN_S = 5.0
+
 
 class ClientDiscord(Protocol):
     async def connecter(self) -> None: ...
@@ -29,7 +36,24 @@ class ClientPypresence:
         self._rpc = AioPresence(client_id, connection_timeout=5, response_timeout=5)
 
     async def connecter(self) -> None:
-        await self._rpc.connect()
+        try:
+            await asyncio.wait_for(self._rpc.connect(), DELAI_POIGNEE_MAIN_S)
+        except Exception:
+            self._fermer_apres_echec()
+            raise
+
+    def _fermer_apres_echec(self) -> None:
+        # La poignée de main peut échouer (timeout, ID invalide, ...) après que le
+        # socket a été ouvert : `handshake()` ne le referme jamais, ce qui fuit un
+        # descripteur par tentative. On le fait à sa place, sans jamais lever : un
+        # échec de fermeture ne doit pas masquer l'échec de connexion d'origine.
+        ecrivain = self._rpc.sock_writer
+        if ecrivain is None:
+            return
+        try:
+            ecrivain.close()
+        except Exception as e:
+            log.warning("fermeture du socket après échec de connexion : %s", type(e).__name__)
 
     async def publier(self, carte: Carte) -> None:
         await self._rpc.update(

@@ -29,7 +29,12 @@ def configurer_logs(dossier: Path) -> None:
     gestionnaire.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     racine = logging.getLogger()
     racine.addHandler(gestionnaire)
-    racine.setLevel(os.environ.get("DRC_LOG", "INFO").upper())
+    niveau = os.environ.get("DRC_LOG", "INFO").upper()
+    try:
+        racine.setLevel(niveau)
+    except ValueError:
+        racine.setLevel("INFO")
+        log.warning("DRC_LOG invalide (%s), repli sur INFO", niveau)
 
 
 class Daemon:
@@ -52,6 +57,7 @@ class Daemon:
         self._par_session: dict[str, tuple[str | None, int]] = {}
         self._tokens_jour = 0
         self._verrou = asyncio.Lock()
+        self._premier_controle = True
 
     def recevoir(self, ev: Evenement) -> None:
         niveau = logging.INFO if ev.nom in ("SessionStart", "SessionEnd") else logging.DEBUG
@@ -75,7 +81,13 @@ class Daemon:
         # Le verrou garantit un seul appelant à la fois pour SuiviTokens, qui n'est pas thread-safe.
         async with self._verrou:
             maintenant = self.horloge()
-            self.config.recharger_si_change()
+            change = self.config.recharger_si_change()
+            # Spec 7.1 : client_id absent → pas de connexion à Discord, erreur dans le
+            # log. Signalé une fois au démarrage, puis seulement si un rechargement
+            # confirme qu'il manque toujours (jamais à chaque tour de la boucle).
+            if self.config.valeur.client_id is None and (self._premier_controle or change):
+                log.error("client_id absent : pas de connexion à Discord")
+            self._premier_controle = False
             inactif_s = self.config.valeur.inactif_apres_min * 60
             self.registre.purger(maintenant, inactif_s, self.pid_vivant)
             transcripts = {
@@ -123,9 +135,21 @@ class Daemon:
 
     @staticmethod
     async def _boucle(action: Callable, periode_s: float, nom: str) -> None:
+        # Le type de l'exception en cours, ou None si le tour précédent a réussi.
+        # Une erreur qui persiste n'est signalée en ERROR qu'une fois (pas à chaque
+        # tour), pour ne pas noyer le journal ; la trace complète (potentiellement
+        # porteuse d'un chemin fourni par un hook, cf. spec 7.5) ne part qu'en DEBUG.
+        type_en_cours: type[BaseException] | None = None
         while True:
             try:
                 await action()
-            except Exception:
-                log.exception("%s en erreur", nom)
+            except Exception as e:
+                if type(e) is not type_en_cours:
+                    log.error("%s en erreur : %s", nom, type(e).__name__)
+                    type_en_cours = type(e)
+                log.debug("%s en erreur, trace complète :", nom, exc_info=True)
+            else:
+                if type_en_cours is not None:
+                    log.info("%s rétabli", nom)
+                    type_en_cours = None
             await asyncio.sleep(periode_s)
