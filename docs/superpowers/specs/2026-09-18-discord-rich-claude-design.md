@@ -246,7 +246,7 @@ Test d'abord, à chaque étape du plan.
 4. `PermissionRequest` se déclenche dans le mode de permission habituel de Victor (`auto`) quand une validation est demandée.
    Résultat (2026-09-18) : confirmée — en mode Manual, la demande de validation d'une commande a émis `PermissionRequest` (`tool_name` `Bash`) avant la décision. En mode `auto`, la même commande n'a demandé aucune validation et aucun événement n'est parti, comme attendu.
 5. Latence réelle d'un hook synchrone `curl` sur le socket (~10 ms supposé).
-   Résultat : à mesurer en Task 8.
+   Résultat (2026-09-18) : confirmée — un hook `curl` synchrone sur le socket coûte environ 13 ms (50 appels en 0,65 s ; médiane 13,3 ms pour un petit corps, 21,9 ms pour un `PreToolUse` sur `Write` de 2 Mo).
 6. Limite de fréquence de Discord sur la mise à jour d'activité, pour fixer l'intervalle minimal de la section 5.
    Résultat (2026-09-18) : confirmée — la documentation Discord (Setting Rich Presence) limite la mise à jour d'activité à une toutes les 15 secondes ; l'issue discord/discord-api-docs#668 montre qu'un dépassement peut vider la présence au lieu de la mettre en file. Intervalle minimal retenu : 15 s.
 7. Emplacement des transcripts de sous-agents : `<dossier du transcript>/<session_id>/subagents/`. Constaté sur une session le 2026-09-18, à confirmer.
