@@ -1,0 +1,114 @@
+"""Connexion à Discord : publication à débit limité, reconnexion. Voir la spec, sections 4.5, 5 et 9."""
+import logging
+import math
+import time
+from collections.abc import Callable
+from typing import Protocol
+
+from pypresence import AioPresence
+
+from .carte import Carte
+
+log = logging.getLogger(__name__)
+
+# Discord documente « one update per 15 seconds » ; au-delà, la présence peut
+# être vidée au lieu d'être mise en file (discord-api-docs#668). Valeur confirmée en Task 1.
+INTERVALLE_MIN_S = 15.0
+REESSAI_S = 15.0
+
+
+class ClientDiscord(Protocol):
+    async def connecter(self) -> None: ...
+    async def publier(self, carte: Carte) -> None: ...
+    async def effacer(self) -> None: ...
+    async def fermer(self) -> None: ...
+
+
+class ClientPypresence:
+    def __init__(self, client_id: str) -> None:
+        self._rpc = AioPresence(client_id, connection_timeout=5, response_timeout=5)
+
+    async def connecter(self) -> None:
+        await self._rpc.connect()
+
+    async def publier(self, carte: Carte) -> None:
+        await self._rpc.update(
+            details=carte.details,
+            state=carte.state,
+            start=carte.debut,
+            large_image=carte.large_image,
+            large_text=carte.large_text,
+        )
+
+    async def effacer(self) -> None:
+        await self._rpc.clear()
+
+    async def fermer(self) -> None:
+        self._rpc.close()
+
+
+class Presence:
+    def __init__(
+        self,
+        fabrique: Callable[[str], ClientDiscord],
+        intervalle_min_s: float = INTERVALLE_MIN_S,
+        reessai_s: float = REESSAI_S,
+        horloge: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._fabrique = fabrique
+        self._intervalle_min_s = intervalle_min_s
+        self._reessai_s = reessai_s
+        self._horloge = horloge
+        self._client: ClientDiscord | None = None
+        self._client_id: str | None = None
+        self._derniere: Carte | None = None
+        self._dernier_envoi = -math.inf
+        self._dernier_essai = -math.inf
+
+    @property
+    def connecte(self) -> bool:
+        return self._client is not None
+
+    async def soumettre(self, carte: Carte | None, client_id: str | None) -> None:
+        if carte is None or client_id is None or client_id != self._client_id:
+            await self.fermer()
+        if carte is None or client_id is None:
+            return
+        maintenant = self._horloge()
+        if self._client is None:
+            if maintenant - self._dernier_essai < self._reessai_s:
+                return
+            self._dernier_essai = maintenant
+            try:
+                client = self._fabrique(client_id)
+                await client.connecter()
+            except Exception as e:
+                log.info("Discord injoignable, nouvel essai dans %.0f s : %s", self._reessai_s, e)
+                return
+            self._client, self._client_id = client, client_id
+            log.info("connecté à Discord")
+        if carte == self._derniere or maintenant - self._dernier_envoi < self._intervalle_min_s:
+            return
+        try:
+            await self._client.publier(carte)
+        except Exception as e:
+            log.warning("publication refusée, reconnexion dans %.0f s : %s", self._reessai_s, e)
+            client, self._client, self._client_id, self._derniere = self._client, None, None, None
+            self._dernier_essai = maintenant
+            try:
+                await client.fermer()
+            except Exception:
+                pass
+            return
+        self._derniere, self._dernier_envoi = carte, maintenant
+
+    async def fermer(self) -> None:
+        client, self._client, self._client_id = self._client, None, None
+        self._derniere, self._dernier_envoi = None, -math.inf
+        if client is None:
+            return
+        for action in (client.effacer, client.fermer):
+            try:
+                await action()
+            except Exception as e:
+                log.debug("fermeture de la connexion Discord : %s", e)
