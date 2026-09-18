@@ -201,6 +201,47 @@ def test_minuit_local_jour_ordinaire_tz_paris(tz_paris):
     assert minuit_local(maintenant) == attendu
 
 
+# --- Fix round 2 (final-fix wave) : F1 -- lecture ligne à ligne, sans liste intermédiaire ---
+
+
+def test_beaucoup_de_lignes_totaux_corrects_et_ligne_finale_incomplete_pas_consommee(tmp_path):
+    lignes = [ligne(f"m{i}", out=1) for i in range(2000)]
+    t = session(tmp_path, lignes=lignes)
+    with t.open("a", encoding="utf-8") as f:
+        f.write(ligne("mfinal", out=99).rstrip("\n"))
+    suivi = SuiviTokens(tmp_path)
+    suivi.rafraichir([t], MINUIT)
+    assert suivi.tokens_session(t) == 2000
+    with t.open("a", encoding="utf-8") as f:
+        f.write("\n")
+    suivi.rafraichir([t], MINUIT)
+    assert suivi.tokens_session(t) == 2099
+
+
+def test_reveillon_meme_suivi_tokens_change_de_jour_entre_deux_rafraichissements(tmp_path):
+    """Un SuiviTokens vivant ne recrée pas ses entrées au changement de jour : les
+    entrées d'avant minuit restent comptées dans le jour d'avant, pas dans celui
+    d'après, même appelées avec deux minuits différents (le jour a tourné) sur le
+    même objet."""
+    hier_minuit = MINUIT - 86_400
+    avant_minuit = MINUIT - 3600  # 23h la veille
+    apres_minuit = MINUIT + 3600  # 1h le jour même
+    t = session(
+        tmp_path,
+        lignes=[
+            ligne("m1", out=10, t=avant_minuit),
+            ligne("m2", out=20, t=apres_minuit),
+        ],
+    )
+    suivi = SuiviTokens(tmp_path)
+    suivi.rafraichir([t], hier_minuit)
+    assert suivi.tokens_jour(hier_minuit) == 30  # les deux entrées tombent après hier minuit
+
+    suivi.rafraichir([t], MINUIT)  # même objet vivant, la journée a tourné
+    assert suivi.tokens_jour(MINUIT) == 20  # seule m2 (après minuit) compte pour aujourd'hui
+    assert suivi.tokens_jour(hier_minuit) == 30  # le total d'hier reste inchangé, sur les mêmes entrées
+
+
 def test_fichier_illisible_ignore_les_autres_restent_comptes(tmp_path):
     if os.geteuid() == 0:
         pytest.skip("chmod sans effet pour root")

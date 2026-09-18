@@ -33,7 +33,7 @@ def charger(chemin: Path) -> Config:
         return Config()
     try:
         return _valider(brut)
-    except (TypeError, ValueError) as e:
+    except (TypeError, ValueError, OverflowError) as e:
         log.warning("config invalide, rien ne sera affiché : %s", e)
         return Config()
 
@@ -60,19 +60,23 @@ def _valider(brut: dict) -> Config:
         chemins.append(chemin)
     return Config(
         client_id=str(cid) if cid not in (None, "") else None,
-        inactif_apres_min=_positif(brut.get("inactif_apres_min", 10), "inactif_apres_min"),
-        rotation_s=_positif(brut.get("rotation_s", 20), "rotation_s"),
+        inactif_apres_min=_borne(brut.get("inactif_apres_min", 10), "inactif_apres_min", 1, 1440),
+        rotation_s=_borne(brut.get("rotation_s", 20), "rotation_s", 5, 3600),
         projets_autorises=tuple(chemins),
     )
 
 
-def _positif(valeur: object, nom: str) -> float:
+def _borne(valeur: object, nom: str, mini: float, maxi: float) -> float:
     if isinstance(valeur, bool) or not isinstance(valeur, (int, float)):
         raise TypeError(f"{nom} doit être un nombre")
+    # Bornes avant `isfinite` : un entier énorme (des centaines de chiffres) fait
+    # lever `OverflowError` à la conversion en float que `isfinite` ferait, mais
+    # est de toute façon hors bornes — la comparaison directe entre entiers ne
+    # convertit jamais en float et ne lève donc jamais.
+    if not mini <= valeur <= maxi:
+        raise ValueError(f"{nom} doit être compris entre {mini} et {maxi}")
     if not math.isfinite(valeur):
         raise ValueError(f"{nom} doit être fini")
-    if valeur <= 0:
-        raise ValueError(f"{nom} doit être positif")
     return valeur
 
 

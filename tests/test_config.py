@@ -1,6 +1,8 @@
 import os
 import stat
 
+import pytest
+
 from discord_rich_claude.config import Config, ConfigSurveillee, charger, creer_config_par_defaut
 
 
@@ -83,6 +85,50 @@ def test_valeur_non_finie_refuse_tout(tmp_path):
     assert charger(f) == Config()
     f = ecrire(tmp_path / "c2.toml", "rotation_s = inf\n")
     assert charger(f) == Config()
+
+
+# --- Fix round 2 (final-fix wave) : F2 -- entier énorme et bornes ---
+
+
+def test_entier_enorme_refuse_tout_sans_lever(tmp_path):
+    f = ecrire(tmp_path / "c.toml", f"inactif_apres_min = {10 ** 309}\n")
+    assert charger(f) == Config()
+
+
+def test_rotation_s_enorme_refuse_tout_sans_lever(tmp_path):
+    f = ecrire(tmp_path / "c.toml", f"rotation_s = {10 ** 309}\n")
+    assert charger(f) == Config()
+
+
+def test_rotation_s_minuscule_hors_bornes_refuse_tout(tmp_path):
+    # 1e-320 passait la validation d'avant (positif), puis faisait lever
+    # `est_vue_b` en boucle : hors bornes désormais.
+    f = ecrire(tmp_path / "c.toml", "rotation_s = 1e-320\n")
+    assert charger(f) == Config()
+
+
+@pytest.mark.parametrize("valeur", [4, 3601])
+def test_rotation_s_hors_bornes_5_3600(tmp_path, valeur):
+    f = ecrire(tmp_path / "c.toml", f"rotation_s = {valeur}\n")
+    assert charger(f) == Config()
+
+
+@pytest.mark.parametrize("valeur", [5, 3600])
+def test_rotation_s_aux_bornes_acceptee(tmp_path, valeur):
+    f = ecrire(tmp_path / "c.toml", f"rotation_s = {valeur}\n")
+    assert charger(f).rotation_s == valeur
+
+
+@pytest.mark.parametrize("valeur", [0, 1441])
+def test_inactif_apres_min_hors_bornes_1_1440(tmp_path, valeur):
+    f = ecrire(tmp_path / "c.toml", f"inactif_apres_min = {valeur}\n")
+    assert charger(f) == Config()
+
+
+@pytest.mark.parametrize("valeur", [1, 1440])
+def test_inactif_apres_min_aux_bornes_acceptee(tmp_path, valeur):
+    f = ecrire(tmp_path / "c.toml", f"inactif_apres_min = {valeur}\n")
+    assert charger(f).inactif_apres_min == valeur
 
 
 def test_client_id_absent_garde_la_liste_blanche(tmp_path):
