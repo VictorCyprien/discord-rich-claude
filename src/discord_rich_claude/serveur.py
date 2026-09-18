@@ -47,9 +47,21 @@ def transcript_autorise(chemin: str, racine: Path) -> bool:
     if not p.is_absolute() or p.suffix != ".jsonl":
         return False
     try:
-        return racine.resolve() in p.resolve().parents
+        # strict=True est fiable sur 3.12 et 3.13 pour détecter une boucle de liens ;
+        # resolve() non strict a cessé de lever sur une boucle depuis Python 3.13.
+        resolu = p.resolve(strict=True)
+    except FileNotFoundError:
+        # le transcript peut ne pas encore exister (ex. SessionStart avant écriture)
+        try:
+            resolu = p.resolve()
+        except (OSError, ValueError, RuntimeError):
+            return False
     except (OSError, ValueError, RuntimeError):
-        # NUL dans le chemin (ValueError), boucle de liens (OSError/RuntimeError selon la plateforme)
+        # boucle de liens (RuntimeError en 3.12, OSError ELOOP en 3.13) ou NUL (ValueError)
+        return False
+    try:
+        return racine.resolve() in resolu.parents
+    except (OSError, ValueError, RuntimeError):
         return False
 
 

@@ -125,6 +125,26 @@ def test_transcript_autorise_faux_sur_boucle_symlink(tmp_path):
     assert not transcript_autorise(str(boucle), racine)
 
 
+def test_transcript_autorise_accepte_un_fichier_pas_encore_ecrit(tmp_path):
+    # 3.12/3.13 : resolve(strict=True) lève FileNotFoundError sur un transcript
+    # qui n'existe pas encore (ex. SessionStart avant la première écriture) ; il
+    # faut alors retomber sur le mode non strict plutôt que refuser l'événement.
+    racine = tmp_path / "projects"
+    (racine / "p").mkdir(parents=True)
+    assert transcript_autorise(str(racine / "p" / "pas-encore-ecrit.jsonl"), racine)
+
+
+def test_transcript_autorise_faux_sur_boucle_dans_un_repertoire(tmp_path):
+    # Boucle sur un composant de répertoire, pas sur la feuille : doit être
+    # rejeté de façon identique en 3.12 (RuntimeError) et en 3.13 (OSError ELOOP),
+    # même si la feuille elle-même n'existe pas.
+    racine = tmp_path / "projects"
+    racine.mkdir()
+    boucle = racine / "boucle"
+    boucle.symlink_to(boucle)
+    assert not transcript_autorise(str(boucle / "x.jsonl"), racine)
+
+
 def test_filtrer_efface_un_transcript_hors_racine(tmp_path):
     ev = filtrer(
         corps(hook_event_name="Stop", session_id="s1", transcript_path="/etc/passwd.jsonl"),
