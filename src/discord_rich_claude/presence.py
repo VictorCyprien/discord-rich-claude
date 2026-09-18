@@ -51,19 +51,19 @@ class ClientPypresence:
         # win32 appelle `_call_connection_lost`) : on ferme nous-mêmes le lecteur.
         try:
             self._rpc.send_data(2, {"v": 1, "client_id": self._rpc.client_id})
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("fermeture IPC Discord incomplète (%s) : %s", "trame de fermeture", type(e).__name__)
         ecrivain = self._rpc.sock_writer
         if ecrivain is None:
             return
         try:
             await ecrivain.drain()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("fermeture IPC Discord incomplète (%s) : %s", "vidage du tampon", type(e).__name__)
         try:
             ecrivain.close()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("fermeture IPC Discord incomplète (%s) : %s", "fermeture du socket", type(e).__name__)
 
 
 class Presence:

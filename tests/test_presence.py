@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import shutil
 import struct
@@ -219,3 +220,22 @@ async def test_client_pypresence_ferme_sans_fermer_la_boucle(monkeypatch):
 
     assert recu[-1] == ("eof", b"")
     assert not asyncio.get_running_loop().is_closed()
+
+
+async def test_fermeture_echouee_loggee_en_warning(caplog):
+    """Une étape de fermeture qui échoue (ici l'envoi de la trame de fermeture,
+    op 2) est loggée en WARNING, jamais silencieuse, et fermer() ne relève rien."""
+    client = ClientPypresence("42")
+
+    def echoue(*args, **kwargs):
+        raise BrokenPipeError("pipe fermé")
+
+    client._rpc.send_data = echoue
+
+    with caplog.at_level(logging.WARNING, logger="discord_rich_claude.presence"):
+        await client.fermer()
+
+    avertissements = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(avertissements) == 1
+    assert "BrokenPipeError" in avertissements[0].getMessage()
+    assert "pipe fermé" not in avertissements[0].getMessage()
