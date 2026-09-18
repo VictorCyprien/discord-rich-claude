@@ -42,7 +42,7 @@ Modules du daemon, chacun testable seul :
 | `config` | Lecture et rechargement du TOML | tomllib (stdlib) |
 | `installation` | `install` / `uninstall` : hooks dans settings.json, LaunchAgent | stdlib |
 
-Le serveur HTTP est codé à la main sur `asyncio.start_unix_server` (une seule route, `POST /event`, réponse `204`), sans aiohttp : c'est petit. Corps limité à 16 Mo : un `PreToolUse` sur `Write` transporte tout le contenu du fichier.
+Le serveur HTTP est codé à la main sur `asyncio.start_unix_server` (deux routes : `POST /event`, réponse `204` ; `GET /etat`, réponse `200` avec `{"discord": bool, "sessions": int}` pour la commande `status`), sans aiohttp : c'est petit. Corps limité à 16 Mo : un `PreToolUse` sur `Write` transporte tout le contenu du fichier.
 
 Une boucle de contrôle tourne toutes les 30 s : inactivité, sessions mortes, relecture des transcripts, rechargement de la config, rotation de la ligne 2.
 
