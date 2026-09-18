@@ -1,4 +1,5 @@
 import json
+import stat
 from datetime import datetime
 
 import pytest
@@ -115,3 +116,146 @@ def test_modifier_settings_invalide_leve_sans_ecrire(tmp_path, contenu):
     with pytest.raises(ValueError):
         modifier_settings(f, ajouter_hooks, lambda d: True, horloge)
     assert f.read_text() == contenu
+
+
+# --- Fix round 1 : H1 -- édition concurrente pendant la confirmation ---
+
+
+def test_modifier_settings_detecte_changement_concurrent(tmp_path):
+    f = tmp_path / "settings.json"
+    f.write_text(json.dumps(settings_tiers()), encoding="utf-8")
+
+    def confirmer_puis_modifier_ailleurs(diff):
+        f.write_text(json.dumps({"model": "sonnet"}), encoding="utf-8")
+        return True
+
+    with pytest.raises(ValueError):
+        modifier_settings(f, ajouter_hooks, confirmer_puis_modifier_ailleurs, horloge)
+    assert json.loads(f.read_text()) == {"model": "sonnet"}
+    assert {p.name for p in tmp_path.iterdir()} == {"settings.json"}
+
+
+def test_modifier_settings_detecte_apparition_du_fichier(tmp_path):
+    f = tmp_path / "settings.json"
+
+    def confirmer_puis_creer(diff):
+        f.write_text(json.dumps({"model": "sonnet"}), encoding="utf-8")
+        return True
+
+    with pytest.raises(ValueError):
+        modifier_settings(f, ajouter_hooks, confirmer_puis_creer, horloge)
+    assert json.loads(f.read_text()) == {"model": "sonnet"}
+    assert {p.name for p in tmp_path.iterdir()} == {"settings.json"}
+
+
+# --- Fix round 1 : H2 -- droits du fichier, écriture atomique, sauvegarde exclusive ---
+
+
+def test_modifier_settings_conserve_les_droits(tmp_path):
+    f = tmp_path / "settings.json"
+    f.write_text(json.dumps(settings_tiers()), encoding="utf-8")
+    f.chmod(0o600)
+    assert modifier_settings(f, ajouter_hooks, lambda d: True, horloge) == "modifié"
+    assert stat.S_IMODE(f.stat().st_mode) == 0o600
+    sauvegarde = tmp_path / "settings.json.bak-20260918-143005"
+    assert stat.S_IMODE(sauvegarde.stat().st_mode) == 0o600
+
+
+def test_modifier_settings_deux_sauvegardes_meme_seconde_ne_s_ecrasent_pas(tmp_path):
+    f = tmp_path / "settings.json"
+    f.write_text(json.dumps(settings_tiers()), encoding="utf-8")
+
+    assert modifier_settings(f, ajouter_hooks, lambda d: True, horloge) == "modifié"
+    apres_premier = json.loads(f.read_text())
+    b0 = tmp_path / "settings.json.bak-20260918-143005"
+    contenu_b0_apres_premier = b0.read_text()
+
+    assert modifier_settings(f, retirer_hooks, lambda d: True, horloge) == "modifié"
+    b1 = tmp_path / "settings.json.bak-20260918-143005-1"
+    assert b1.exists()
+    assert b0.read_text() == contenu_b0_apres_premier
+    assert json.loads(b1.read_text()) == apres_premier
+
+
+def test_modifier_settings_echec_a_l_ecriture_ne_laisse_pas_de_fichier_temporaire(tmp_path, monkeypatch):
+    f = tmp_path / "settings.json"
+    contenu_initial = json.dumps(settings_tiers())
+    f.write_text(contenu_initial, encoding="utf-8")
+
+    def replace_qui_echoue(*a, **kw):
+        raise OSError("échec simulé")
+
+    monkeypatch.setattr("discord_rich_claude.installation.os.replace", replace_qui_echoue)
+
+    with pytest.raises(OSError):
+        modifier_settings(f, ajouter_hooks, lambda d: True, horloge)
+
+    assert f.read_text() == contenu_initial
+    noms = {p.name for p in tmp_path.iterdir()}
+    assert noms == {"settings.json", "settings.json.bak-20260918-143005"}
+
+
+def test_modifier_settings_transformer_non_serialisable_ne_laisse_rien(tmp_path):
+    f = tmp_path / "settings.json"
+    contenu_initial = json.dumps({"model": "opus"})
+    f.write_text(contenu_initial, encoding="utf-8")
+
+    with pytest.raises(TypeError):
+        modifier_settings(f, lambda d: {"objet": object()}, lambda d: True, horloge)
+
+    assert f.read_text() == contenu_initial
+    assert list(tmp_path.iterdir()) == [f]
+
+
+# --- Fix round 1 : H3 -- formes qu'on ne sait pas modifier sans risque ---
+
+
+def test_retirer_laisse_intacte_une_valeur_d_evenement_qui_est_un_objet():
+    s = {"hooks": {"Stop": {"matcher": "x", "hooks": [dict(TIERS)]}}}
+    assert retirer_hooks(s) == s
+
+
+def test_retirer_laisse_intacte_une_valeur_d_evenement_qui_est_une_chaine():
+    s = {"hooks": {"Stop": "abc"}}
+    assert retirer_hooks(s) == s
+
+
+def test_retirer_laisse_intact_un_groupe_qui_n_est_pas_un_objet():
+    s = {"hooks": {"Stop": ["pas-un-objet"]}}
+    assert retirer_hooks(s) == s
+
+
+def test_retirer_laisse_intact_un_groupe_dont_les_hooks_ne_sont_pas_une_liste():
+    s = {"hooks": {"Stop": [{"hooks": None}]}}
+    assert retirer_hooks(s) == s
+
+
+def test_retirer_garde_un_objet_hooks_deja_vide():
+    assert retirer_hooks({"hooks": {}}) == {"hooks": {}}
+
+
+def test_retirer_leve_si_hooks_n_est_pas_un_objet():
+    with pytest.raises(ValueError):
+        retirer_hooks({"hooks": "abc"})
+    with pytest.raises(ValueError):
+        retirer_hooks({"hooks": None})
+
+
+def test_ajouter_leve_si_hooks_n_est_pas_un_objet():
+    with pytest.raises(ValueError):
+        ajouter_hooks({"hooks": "abc"})
+    with pytest.raises(ValueError):
+        ajouter_hooks({"hooks": None})
+
+
+def test_ajouter_leve_si_un_evenement_n_est_pas_une_liste_et_nomme_l_evenement():
+    with pytest.raises(ValueError, match="Stop"):
+        ajouter_hooks({"hooks": {"Stop": "abc"}})
+
+
+def test_ajouter_preserve_un_groupe_malforme_sans_planter():
+    s = {"hooks": {"Stop": [{"hooks": None}]}}
+    resultat = ajouter_hooks(s)
+    groupes = resultat["hooks"]["Stop"]
+    assert {"hooks": None} in groupes
+    assert {"hooks": [{"type": "command", "command": COMMANDE_HOOK, "timeout": 2}]} in groupes
