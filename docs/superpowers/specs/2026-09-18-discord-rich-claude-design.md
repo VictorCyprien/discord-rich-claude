@@ -184,9 +184,9 @@ Noms de fichiers, commandes, prompts, branche git, chemins. Un nom de projet uni
 
 - `uv tool install .` fournit la commande `discord-rich-claude` : `run`, `install`, `uninstall`, `status`.
 - `install` :
-  1. sauvegarde `~/.claude/settings.json` en `settings.json.bak-AAAAMMJJ-HHMMSS` ;
-  2. calcule l'ajout des hooks (section 4.1), affiche la différence, attend un « o » explicite ;
-  3. écrit en conservant les hooks existants d'autres outils. Idempotent : nos hooks sont reconnus à la présence de `discord-rich-claude` dans la commande ;
+  1. calcule l'ajout des hooks (section 4.1), affiche la différence, attend un « o » explicite ;
+  2. relit le fichier : s'il a changé pendant la confirmation, n'écrit rien et demande de relancer ; sinon le sauvegarde en `settings.json.bak-AAAAMMJJ-HHMMSS` (mêmes droits que l'original, jamais écrasée) ;
+  3. écrit de façon atomique, avec les droits de l'original, en conservant les hooks existants d'autres outils. Idempotent : nos hooks sont reconnus à la présence de `discord-rich-claude` dans la commande ;
   4. crée `~/Library/LaunchAgents/local.discord-rich-claude.plist` (`RunAtLoad`, `KeepAlive`, lance `discord-rich-claude run`) et le charge avec `launchctl bootstrap gui/<uid>` ;
   5. crée la config avec une liste blanche vide si elle n'existe pas.
 - `uninstall` : retire seulement nos hooks et le LaunchAgent (`launchctl bootout`). Garde la config.
