@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import socket
+import stat
 import time
 from collections.abc import Callable
 from contextlib import suppress
@@ -22,6 +23,7 @@ log = logging.getLogger(__name__)
 
 TAILLE_MAX = 16 * 1024 * 1024  # un PreToolUse sur Write transporte tout le fichier
 DELAI_S = 2.0
+PID_MAX = 2**31
 CHAMPS_LUS = ("session_id", "cwd", "hook_event_name", "tool_name", "agent_id", "transcript_path")
 EVENEMENTS = frozenset(
     {
@@ -44,20 +46,36 @@ def transcript_autorise(chemin: str, racine: Path) -> bool:
     p = Path(chemin)
     if not p.is_absolute() or p.suffix != ".jsonl":
         return False
-    return racine.resolve() in p.resolve().parents
+    try:
+        return racine.resolve() in p.resolve().parents
+    except (OSError, ValueError, RuntimeError):
+        # NUL dans le chemin (ValueError), boucle de liens (OSError/RuntimeError selon la plateforme)
+        return False
 
 
 def _pid(brut: str | None) -> int | None:
-    if brut and brut.isascii() and brut.isdigit():
-        pid = int(brut)
-        return pid if pid > 1 else None
+    if not brut or not brut.isascii() or not brut.isdigit() or not 1 <= len(brut) <= 7:
+        return None
+    pid = int(brut)
+    return pid if 1 < pid < PID_MAX else None
+
+
+def _cwd(brut: str | None) -> str | None:
+    if brut is None or "\x00" in brut or not brut.startswith("/"):
+        return None
+    return brut
+
+
+def _identifiant(brut: str | None) -> str | None:
+    if brut and SESSION_ID.fullmatch(brut):
+        return brut
     return None
 
 
 def filtrer(corps: bytes, pid_brut: str | None, recu_a: float, projets_claude: Path) -> Evenement | None:
     try:
         brut = json.loads(corps)
-    except ValueError:
+    except (ValueError, RecursionError):
         return None
     if not isinstance(brut, dict):
         return None
@@ -66,7 +84,7 @@ def filtrer(corps: bytes, pid_brut: str | None, recu_a: float, projets_claude: P
     if any(v is not None and not isinstance(v, str) for v in champs.values()):
         return None
     nom, session_id = champs["hook_event_name"], champs["session_id"]
-    if nom not in EVENEMENTS or not session_id or not SESSION_ID.match(session_id):
+    if nom not in EVENEMENTS or not session_id or not SESSION_ID.fullmatch(session_id):
         return None
     transcript = champs["transcript_path"]
     if transcript is not None and not transcript_autorise(transcript, projets_claude):
@@ -75,9 +93,9 @@ def filtrer(corps: bytes, pid_brut: str | None, recu_a: float, projets_claude: P
         nom=nom,
         session_id=session_id,
         recu_a=recu_a,
-        cwd=champs["cwd"],
+        cwd=_cwd(champs["cwd"]),
         tool_name=champs["tool_name"],
-        agent_id=champs["agent_id"],
+        agent_id=_identifiant(champs["agent_id"]),
         transcript_path=transcript,
         pid=_pid(pid_brut),
     )
@@ -130,17 +148,51 @@ async def _traiter(
         if ev is not None:
             try:
                 sur_evenement(ev)
-            except Exception:
-                log.exception("événement %s en erreur", ev.nom)
+            except Exception as e:
+                log.error("erreur sur un événement %s : %s", ev.nom, type(e).__name__)
                 await _repondre(ecrivain, 500)
                 return
         await _repondre(ecrivain, 204)
     except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, TimeoutError, ValueError, ConnectionError) as e:
         log.debug("requête rejetée : %s", type(e).__name__)
+    except Exception as e:
+        # dernier filet : une erreur imprévue (ex. etat() qui lève) ne doit ni faire taire
+        # le serveur ni écrire de contenu ou de traceback dans le log.
+        log.error("erreur inattendue dans le traitement d'une requête : %s", type(e).__name__)
+        with suppress(Exception):
+            await _repondre(ecrivain, 500)
     finally:
         ecrivain.close()
         with suppress(Exception):
             await ecrivain.wait_closed()
+
+
+def _verifier_dossier_etat(dossier: Path) -> None:
+    dossier.mkdir(parents=True, exist_ok=True)
+    info = os.lstat(dossier)
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+        raise PermissionError(
+            f"dossier d'état invalide (lien, non-dossier ou autre propriétaire) : {dossier}"
+        )
+    os.chmod(dossier, 0o700)
+
+
+async def _remplacer_ancien_socket(chemin_socket: Path) -> None:
+    try:
+        info = os.lstat(chemin_socket)
+    except FileNotFoundError:
+        return
+    if not stat.S_ISSOCK(info.st_mode):
+        # symlink ou fichier ordinaire à la place du socket : unlink ne suit jamais un lien
+        chemin_socket.unlink()
+        return
+    try:
+        _, ecrivain = await asyncio.open_unix_connection(str(chemin_socket))
+    except OSError:
+        chemin_socket.unlink()  # socket orphelin d'un daemon mort
+    else:
+        ecrivain.close()
+        raise DejaLance(str(chemin_socket))
 
 
 async def demarrer_serveur(
@@ -149,27 +201,24 @@ async def demarrer_serveur(
     etat: Callable[[], dict],
     projets_claude: Path,
 ) -> asyncio.Server:
-    dossier = chemin_socket.parent
-    dossier.mkdir(parents=True, exist_ok=True)
-    os.chmod(dossier, 0o700)
-    if chemin_socket.exists():
-        try:
-            _, ecrivain = await asyncio.open_unix_connection(str(chemin_socket))
-        except OSError:
-            chemin_socket.unlink()  # socket orphelin d'un daemon mort
-        else:
-            ecrivain.close()
-            raise DejaLance(str(chemin_socket))
+    _verifier_dossier_etat(chemin_socket.parent)
+    await _remplacer_ancien_socket(chemin_socket)
     gestionnaire = functools.partial(
         _traiter, sur_evenement=sur_evenement, etat=etat, projets_claude=projets_claude
     )
-    ancien = os.umask(0o177)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        serveur = await asyncio.start_unix_server(gestionnaire, path=str(chemin_socket))
-    finally:
-        os.umask(ancien)
-    os.chmod(chemin_socket, 0o600)
-    return serveur
+        ancien = os.umask(0o177)
+        try:
+            sock.bind(str(chemin_socket))
+        finally:
+            os.umask(ancien)
+        os.chmod(chemin_socket, 0o600)
+        sock.listen()
+        return await asyncio.start_unix_server(gestionnaire, sock=sock)
+    except BaseException:
+        sock.close()
+        raise
 
 
 def interroger_etat(chemin_socket: Path, delai_s: float = 1.0) -> dict | None:
