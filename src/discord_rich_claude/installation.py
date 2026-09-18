@@ -173,25 +173,47 @@ def generer_plist(executable: str, dossier_logs: Path) -> bytes:
             "ProgramArguments": [executable, "run"],
             "RunAtLoad": True,
             "KeepAlive": True,
-            "ProcessType": "Background",
             "StandardOutPath": str(dossier_logs / "launchd.out.log"),
             "StandardErrorPath": str(dossier_logs / "launchd.err.log"),
         }
     )
 
 
+def _ecrire_plist_atomique(chemin_plist: Path, contenu: bytes) -> None:
+    chemin_plist.parent.mkdir(parents=True, exist_ok=True)
+    fd, nom_temp = tempfile.mkstemp(
+        dir=chemin_plist.parent, prefix=f".{chemin_plist.name}.", suffix=".tmp"
+    )
+    temporaire = Path(nom_temp)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(contenu)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporaire, chemin_plist)
+    except BaseException:
+        try:
+            temporaire.unlink()
+        except OSError:
+            pass
+        raise
+
+
 def installer_launch_agent(
-    chemin_plist: Path, contenu: bytes, executer: Callable = subprocess.run
+    chemin_plist: Path, contenu: bytes, executer: Callable | None = None
 ) -> None:
+    executer = executer or subprocess.run
     domaine = f"gui/{os.getuid()}"
+    # Le plist est écrit avant tout appel à launchctl : un échec d'écriture (droits,
+    # disque plein) ne doit jamais décharger un daemon qui tournait déjà.
+    _ecrire_plist_atomique(chemin_plist, contenu)
     # Décharge une version précédente ; échoue sans conséquence si rien n'est chargé.
     executer(["launchctl", "bootout", f"{domaine}/{LABEL}"], check=False, capture_output=True)
-    chemin_plist.parent.mkdir(parents=True, exist_ok=True)
-    chemin_plist.write_bytes(contenu)
     executer(["launchctl", "bootstrap", domaine, str(chemin_plist)], check=True, capture_output=True)
 
 
-def desinstaller_launch_agent(chemin_plist: Path, executer: Callable = subprocess.run) -> None:
+def desinstaller_launch_agent(chemin_plist: Path, executer: Callable | None = None) -> None:
+    executer = executer or subprocess.run
     executer(
         ["launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"], check=False, capture_output=True
     )

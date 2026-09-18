@@ -1,3 +1,4 @@
+import inspect
 import json
 import os
 import plistlib
@@ -276,6 +277,8 @@ def test_generer_plist(tmp_path):
     assert plist["RunAtLoad"] is True
     assert plist["KeepAlive"] is True
     assert plist["StandardErrorPath"] == str(tmp_path / "launchd.err.log")
+    # K5 : ProcessType=Background throttlerait un process sur le chemin synchrone du hook.
+    assert "ProcessType" not in plist
 
 
 def test_installer_launch_agent(tmp_path):
@@ -298,3 +301,44 @@ def test_desinstaller_launch_agent(tmp_path):
     assert not chemin.exists()
     assert appels == [["launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"]]
     desinstaller_launch_agent(chemin, executer=lambda cmd, **kw: None)  # déjà absent : pas d'erreur
+
+
+# --- Fix round 1 (hardening avant l'installation réelle, Task 11) ---
+
+
+# --- K3 : le plist est écrit (atomiquement) avant le bootout ---
+
+
+def test_installer_launch_agent_ecrit_le_plist_avant_le_bootout(tmp_path):
+    chemin = tmp_path / "LaunchAgents" / f"{LABEL}.plist"
+
+    def verifie_deja_ecrit(cmd, **kw):
+        assert chemin.read_bytes() == b"<plist/>"
+
+    installer_launch_agent(chemin, b"<plist/>", executer=verifie_deja_ecrit)
+
+
+def test_installer_launch_agent_echec_ecriture_n_appelle_pas_launchctl(tmp_path):
+    appels = []
+    dossier = tmp_path / "LaunchAgents"
+    dossier.mkdir()
+    chemin = dossier / f"{LABEL}.plist"
+    os.chmod(dossier, 0o500)  # lecture/exécution seules : impossible d'y créer un fichier
+    try:
+        with pytest.raises(OSError):
+            installer_launch_agent(chemin, b"<plist/>", executer=lambda cmd, **kw: appels.append(cmd))
+    finally:
+        os.chmod(dossier, 0o700)
+    assert appels == []
+    assert not chemin.exists()
+
+
+# --- K4 : l'exécuteur par défaut n'est plus figé à la définition ---
+
+
+def test_installer_launch_agent_executer_par_defaut_nest_pas_fige_a_la_definition():
+    assert inspect.signature(installer_launch_agent).parameters["executer"].default is None
+
+
+def test_desinstaller_launch_agent_executer_par_defaut_nest_pas_fige_a_la_definition():
+    assert inspect.signature(desinstaller_launch_agent).parameters["executer"].default is None

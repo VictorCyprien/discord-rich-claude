@@ -1,4 +1,5 @@
 import os
+import stat
 
 from discord_rich_claude.config import Config, ConfigSurveillee, charger, creer_config_par_defaut
 
@@ -127,3 +128,20 @@ def test_config_par_defaut_n_ecrase_pas(tmp_path):
     f.write_text('client_id = "1"\n', encoding="utf-8")
     assert creer_config_par_defaut(f) is False
     assert f.read_text(encoding="utf-8") == 'client_id = "1"\n'
+
+
+# --- Fix round 1 (hardening avant l'installation réelle, Task 11) : K6 ---
+
+
+def test_config_par_defaut_creee_en_0600(tmp_path):
+    f = tmp_path / "config.toml"
+    assert creer_config_par_defaut(f) is True
+    assert stat.S_IMODE(f.stat().st_mode) == 0o600
+
+
+def test_config_par_defaut_lien_symbolique_pendant_refuse_sans_toucher_la_cible(tmp_path):
+    cible = tmp_path / "cible-absente.toml"
+    lien = tmp_path / "config.toml"
+    lien.symlink_to(cible)
+    assert creer_config_par_defaut(lien) is False
+    assert not cible.exists()

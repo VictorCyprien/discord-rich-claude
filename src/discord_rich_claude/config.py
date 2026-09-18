@@ -5,6 +5,7 @@ client_id, donc rien de montré (refus par défaut).
 """
 import logging
 import math
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,8 +114,16 @@ autorises = []
 
 
 def creer_config_par_defaut(chemin: Path) -> bool:
-    if chemin.exists():
-        return False
+    """Création exclusive, 0600 : la config contiendra des chemins de projets.
+
+    O_EXCL avec O_CREAT échoue si `chemin` existe déjà, même comme lien
+    symbolique pendant (vers une cible absente) — jamais suivi ni écrasé.
+    """
     chemin.parent.mkdir(parents=True, exist_ok=True)
-    chemin.write_text(CONFIG_PAR_DEFAUT, encoding="utf-8")
+    try:
+        fd = os.open(chemin, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(CONFIG_PAR_DEFAUT)
     return True
