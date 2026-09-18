@@ -19,7 +19,7 @@ Le projet reste en français (code, tests, libellés, commits) : ne rien traduir
 - Confidentialité : `serveur.filtrer` ne garde qu'une liste fermée de champs (`session_id`, `cwd`, `hook_event_name`, `tool_name`, `agent_id`, `transcript_path`, l'en-tête `X-Claude-Pid`). N'en ajouter un qu'avec une décision écrite dans la spec. Jamais de prompt, de `tool_input`, de chemin de fichier édité dans un log ou sur Discord.
 - Liste blanche des projets : refus par défaut, comparaison de chemins résolus, jamais de nom de dossier seul.
 - Aucun accès réseau. Seule dépendance d'exécution : pypresence.
-- `sessions` et `carte` restent sans entrée-sortie.
+- `sessions` reste sans entrée-sortie ; `carte` aussi, sauf une résolution de chemin mise en cache par dossier (`nom_projet`, F4 : le volume qui porte un projet peut être mal monté, un `resolve()` non mis en cache bloquerait la boucle carte à 1 s).
 - Discord est mocké dans les tests (faux client), le socket et `curl` sont réels.
 - Libellés en français, ceux de la spec, codés en dur (jamais improvisés).
 - Sous macOS, un chemin de socket Unix est limité à 104 octets : les tests de socket utilisent la fixture `dossier_court`.

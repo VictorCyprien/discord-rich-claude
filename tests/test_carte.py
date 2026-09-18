@@ -1,5 +1,8 @@
+from pathlib import Path
+
 import pytest
 
+import discord_rich_claude.carte as carte_module
 from discord_rich_claude.carte import (
     Carte,
     Stats,
@@ -131,3 +134,45 @@ def test_carte_inactive():
 
 def test_pas_de_carte_sans_session():
     assert construire_carte(Registre(), Config(), Stats(), 0, vue_b=False) is None
+
+
+# --- Fix round 2 (final-fix wave) : F4 -- résolution de cwd mise en cache ---
+
+
+def test_nom_projet_resolution_mise_en_cache(tmp_path, monkeypatch):
+    p = tmp_path / "MonProjet"
+    p.mkdir()
+    autorise = p.resolve()
+    carte_module._resoudre.cache_clear()
+    compteur = {"n": 0}
+    resolve_original = Path.resolve
+
+    def resolve_compte(self, *a, **kw):
+        compteur["n"] += 1
+        return resolve_original(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "resolve", resolve_compte)
+    assert nom_projet(str(p), (autorise,)) == "MonProjet"
+    assert nom_projet(str(p), (autorise,)) == "MonProjet"
+    assert compteur["n"] == 1
+
+
+# --- Fix round 2 (final-fix wave) : F5 -- limite Discord de 128 caractères ---
+
+
+def test_details_tronque_a_128_caracteres(tmp_path):
+    nom = "x" * 200
+    p = tmp_path / nom
+    p.mkdir()
+    r = registre(("s1", 1000, str(p)))
+    carte = construire_carte(r, Config(projets_autorises=(p.resolve(),)), Stats(), 1001, vue_b=False)
+    assert len(carte.details) == 128
+    assert carte.details.endswith("…")
+
+
+def test_state_tronque_a_128_caracteres():
+    r = registre(("s1", 1000, None))
+    modele_long = "x" * 200
+    carte = construire_carte(r, Config(), Stats(modele=modele_long), 1001, vue_b=False)
+    assert len(carte.state) == 128
+    assert carte.state.endswith("…")

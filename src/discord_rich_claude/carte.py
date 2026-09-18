@@ -1,4 +1,5 @@
 """Construction de la carte Discord. Fonctions pures. Voir la spec, section 5."""
+import functools
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,6 +8,7 @@ from .config import Config
 from .sessions import Registre, activite_affichee
 
 PROJET_PRIVE = "Projet privé"
+LIMITE_DISCORD = 128
 _MODELE = re.compile(r"^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$")
 
 
@@ -45,16 +47,34 @@ def nom_modele(model_id: str | None) -> str | None:
     return f"{famille.capitalize()} {version}"
 
 
+@functools.lru_cache(maxsize=128)
+def _resoudre(cwd: str) -> Path | None:
+    # Mis en cache par dossier : appelé chaque seconde par la boucle carte, un
+    # `resolve()` peut bloquer si le volume qui porte le projet est mal monté.
+    try:
+        return Path(cwd).resolve()
+    except (OSError, RuntimeError):
+        return None
+
+
 def nom_projet(cwd: str | None, autorises: tuple[Path, ...]) -> str:
     # Comparaison sur chemins complets résolus : un homonyme ou un dossier dont le
     # nom commence pareil n'est jamais autorisé par erreur.
     if not cwd:
         return PROJET_PRIVE
-    chemin = Path(cwd).resolve()
+    chemin = _resoudre(cwd)
+    if chemin is None:
+        return PROJET_PRIVE
     for autorise in autorises:
         if chemin == autorise or autorise in chemin.parents:
             return autorise.name
     return PROJET_PRIVE
+
+
+def _tronquer(texte: str, limite: int = LIMITE_DISCORD) -> str:
+    if len(texte) <= limite:
+        return texte
+    return texte[: limite - 1] + "…"
 
 
 def est_vue_b(maintenant: float, rotation_s: float) -> bool:
@@ -77,4 +97,8 @@ def construire_carte(
         tokens = f"{formater_nombre(stats.tokens_session)} tokens"
         modele = nom_modele(stats.modele)
         state = f"{modele} · {tokens}" if modele else tokens
-    return Carte(details=details, state=state, debut=int(registre.debut_plus_ancien()))
+    # Discord refuse toute mise à jour dont `details` ou `state` dépasse 128
+    # caractères (déconnexion, puis nouvel essai toutes les 15 s).
+    return Carte(
+        details=_tronquer(details), state=_tronquer(state), debut=int(registre.debut_plus_ancien())
+    )
