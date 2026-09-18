@@ -187,8 +187,9 @@ Noms de fichiers, commandes, prompts, branche git, chemins. Un nom de projet uni
   1. calcule l'ajout des hooks (section 4.1), affiche la différence, attend un « o » explicite ;
   2. relit le fichier : s'il a changé pendant la confirmation, n'écrit rien et demande de relancer ; sinon le sauvegarde en `settings.json.bak-AAAAMMJJ-HHMMSS` (mêmes droits que l'original, jamais écrasée) ;
   3. écrit de façon atomique, avec les droits de l'original, en conservant les hooks existants d'autres outils. Idempotent : nos hooks sont reconnus à la présence de `discord-rich-claude` dans la commande ;
-  4. crée `~/Library/LaunchAgents/local.discord-rich-claude.plist` (`RunAtLoad`, `KeepAlive`, lance `discord-rich-claude run`) et le charge avec `launchctl bootstrap gui/<uid>` ;
-  5. crée la config avec une liste blanche vide si elle n'existe pas.
+  4. crée la config avec une liste blanche vide si elle n'existe pas (droits 0600, jamais écrasée) ;
+  5. crée `~/Library/LaunchAgents/local.discord-rich-claude.plist` (`RunAtLoad`, `KeepAlive`, lance `discord-rich-claude run` par un chemin absolu) et le charge avec `launchctl bootstrap gui/<uid>`.
+- `install` et `uninstall` refusent de tourner en root.
 - `uninstall` : retire seulement nos hooks et le LaunchAgent (`launchctl bootout`). Garde la config.
 - `status` : daemon joignable ou non, Discord connecté ou non, sessions vivantes.
 - Commande d'un hook :
