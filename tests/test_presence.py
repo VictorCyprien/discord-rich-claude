@@ -1,5 +1,14 @@
+import asyncio
+import json
+import os
+import shutil
+import struct
+import tempfile
+
+import pytest
+
 from discord_rich_claude.carte import Carte
-from discord_rich_claude.presence import Presence
+from discord_rich_claude.presence import ClientPypresence, Presence
 
 A = Carte(details="Écrit du code · Projet privé", state="Opus 5 · 1 k tokens", debut=0)
 B = Carte(details="Lit le code · Projet privé", state="Opus 5 · 1 k tokens", debut=0)
@@ -132,3 +141,81 @@ async def test_changement_de_client_id_reconnecte():
     h.t = 20
     await p.soumettre(A, "43")
     assert journal[-4:] == ["effacer", "fermer", ("connecter", "43"), ("publier", A.details)]
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
+async def test_client_pypresence_ferme_sans_fermer_la_boucle(monkeypatch):
+    """ClientPypresence.fermer() contre un faux serveur IPC Discord (aucun réseau,
+    aucune vraie app Discord). Vérifie que fermer() envoie la trame de fermeture
+    (op 2), ferme le socket écrivain de son côté (le serveur voit un EOF), et ne
+    touche jamais à la boucle asyncio en cours.
+
+    Le filtre ignore un avertissement propre à pypresence 4.6.2 : `get_ipc_path()`
+    (pypresence/utils.py) fait `return` depuis l'intérieur d'un `for entry in
+    os.scandir(...)`, sans jamais fermer l'itérateur ; sous `-W error`, le
+    `ResourceWarning: unclosed scandir iterator` levé à sa finalisation devient une
+    erreur. Défaut de la librairie tierce, sans rapport avec `fermer()` ; hors
+    périmètre de ce correctif."""
+    dossier = tempfile.mkdtemp(dir="/tmp")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", dossier)
+    chemin_socket = os.path.join(dossier, "discord-ipc-0")
+    recu = []
+    fermeture = asyncio.Event()
+
+    async def gerer_connexion(reader, writer):
+        try:
+            while True:
+                try:
+                    entete = await reader.readexactly(8)
+                except asyncio.IncompleteReadError:
+                    return
+                op, longueur = struct.unpack("<II", entete)
+                corps = await reader.readexactly(longueur) if longueur else b""
+                charge = json.loads(corps) if corps else {}
+                recu.append((op, charge))
+                if op == 0:
+                    reponse = json.dumps({"cmd": "DISPATCH", "evt": "READY", "data": {}}).encode()
+                    writer.write(struct.pack("<II", 1, len(reponse)) + reponse)
+                    await writer.drain()
+                elif op == 1:
+                    reponse = json.dumps({"cmd": "SET_ACTIVITY", "evt": None, "data": {}}).encode()
+                    writer.write(struct.pack("<II", 1, len(reponse)) + reponse)
+                    await writer.drain()
+                elif op == 2:
+                    fin = await asyncio.wait_for(reader.read(1), 1)
+                    recu.append(("eof", fin))
+                    fermeture.set()
+                    return
+        finally:
+            writer.close()
+
+    serveur = await asyncio.start_unix_server(gerer_connexion, path=chemin_socket)
+    try:
+        carte = Carte(details="Écrit du code · Projet privé", state="Opus 5 · 1 k tokens", debut=1234)
+        client = ClientPypresence("42")
+        await client.connecter()
+        await client.publier(carte)
+        await client.effacer()
+        await client.fermer()
+        await asyncio.wait_for(fermeture.wait(), timeout=2)
+    finally:
+        serveur.close()
+        await serveur.wait_closed()
+        shutil.rmtree(dossier, ignore_errors=True)
+
+    ops = [op for op, _ in recu if isinstance(op, int)]
+    assert ops == [0, 1, 1, 2]
+
+    _, poignee_de_main = recu[0]
+    assert poignee_de_main["client_id"] == "42"
+
+    _, publication = recu[1]
+    activite = publication["args"]["activity"]
+    assert activite["details"] == carte.details
+    assert activite["state"] == carte.state
+    assert activite["timestamps"]["start"] == carte.debut
+    assert activite["assets"]["large_image"] == carte.large_image
+    assert activite["assets"]["large_text"] == carte.large_text
+
+    assert recu[-1] == ("eof", b"")
+    assert not asyncio.get_running_loop().is_closed()

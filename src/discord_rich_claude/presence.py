@@ -44,7 +44,26 @@ class ClientPypresence:
         await self._rpc.clear()
 
     async def fermer(self) -> None:
-        self._rpc.close()
+        # Reprend `AioPresence.close()` (pypresence 4.6.2) sans son `self.loop.close()` :
+        # `self.loop` y est la boucle asyncio en cours (capturée par `get_event_loop()`
+        # à la connexion), la fermer lève `RuntimeError: Cannot close a running event
+        # loop`. Sur macOS/Linux, `close()` ne ferme jamais le socket non plus (seul
+        # win32 appelle `_call_connection_lost`) : on ferme nous-mêmes le lecteur.
+        try:
+            self._rpc.send_data(2, {"v": 1, "client_id": self._rpc.client_id})
+        except Exception:
+            pass
+        ecrivain = self._rpc.sock_writer
+        if ecrivain is None:
+            return
+        try:
+            await ecrivain.drain()
+        except Exception:
+            pass
+        try:
+            ecrivain.close()
+        except Exception:
+            pass
 
 
 class Presence:
@@ -111,4 +130,4 @@ class Presence:
             try:
                 await action()
             except Exception as e:
-                log.debug("fermeture de la connexion Discord : %s", e)
+                log.warning("fermeture de la connexion Discord : %s", e)
