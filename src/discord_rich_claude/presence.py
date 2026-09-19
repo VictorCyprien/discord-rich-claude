@@ -107,6 +107,10 @@ class Presence:
         self._derniere: Carte | None = None
         self._dernier_envoi = -math.inf
         self._dernier_essai = -math.inf
+        # Type de l'exception en cours (None si le dernier essai a réussi) : le
+        # même pattern que `daemon._boucle`, pour ne pas noyer le journal d'un
+        # essai toutes les 15 s tant que Discord est injoignable.
+        self._type_erreur_en_cours: type[BaseException] | None = None
 
     @property
     def connecte(self) -> bool:
@@ -126,16 +130,17 @@ class Presence:
                 client = self._fabrique(client_id)
                 await client.connecter()
             except Exception as e:
-                log.info("Discord injoignable, nouvel essai dans %.0f s : %s", self._reessai_s, e)
+                self._signaler_echec("Discord injoignable, nouvel essai dans %.0f s", e)
                 return
             self._client, self._client_id = client, client_id
+            self._type_erreur_en_cours = None
             log.info("connecté à Discord")
         if carte == self._derniere or maintenant - self._dernier_envoi < self._intervalle_min_s:
             return
         try:
             await self._client.publier(carte)
         except Exception as e:
-            log.warning("publication refusée, reconnexion dans %.0f s : %s", self._reessai_s, e)
+            self._signaler_echec("publication refusée, reconnexion dans %.0f s", e)
             client, self._client, self._client_id, self._derniere = self._client, None, None, None
             self._dernier_essai = maintenant
             try:
@@ -144,6 +149,17 @@ class Presence:
                 pass
             return
         self._derniere, self._dernier_envoi = carte, maintenant
+
+    def _signaler_echec(self, gabarit: str, e: Exception) -> None:
+        # Tant que Discord reste injoignable (fermé, ID invalide...), un essai
+        # toutes les 15 s ne doit produire qu'une seule ligne WARNING par type
+        # d'exception rencontré ; les répétitions du même type partent en DEBUG.
+        # Jamais `str(e)` : seul le type, comme `daemon._boucle`.
+        if type(e) is not self._type_erreur_en_cours:
+            log.warning(gabarit + " : %s", self._reessai_s, type(e).__name__)
+            self._type_erreur_en_cours = type(e)
+        else:
+            log.debug(gabarit + " : %s", self._reessai_s, type(e).__name__)
 
     async def fermer(self) -> None:
         client, self._client, self._client_id = self._client, None, None

@@ -97,35 +97,42 @@ class Fichier:
             if modele is not None:
                 self.modele = modele
 
-    def _nouvelles_lignes(self) -> list[dict]:
+    def _nouvelles_lignes(self) -> Iterable[dict]:
+        """Lit et transmet une ligne complète à la fois : jamais tout le fichier ni
+        toutes ses lignes en mémoire à la fois (un transcript peut dépasser 200 Mo).
+        """
         try:
             if self.chemin.stat().st_size < self.decalage:
                 # Fichier réécrit plus court : on repart de zéro.
                 self.decalage, self.entrees, self.modele = 0, {}, None
             with self.chemin.open("rb") as f:
                 f.seek(self.decalage)
-                bloc = f.read()
+                for brute in f:
+                    if not brute.endswith(b"\n"):
+                        # Ligne incomplète en fin de fichier : elle attend le tour
+                        # suivant, décalage pas avancé.
+                        break
+                    self.decalage += len(brute)
+                    ligne = brute[:-1]
+                    if not ligne.strip():
+                        continue
+                    # Filtre rapide avant le coût de json.loads : la grande majorité
+                    # des lignes d'un transcript (tool_use, tool_result...) ne
+                    # portent ni usage ni modèle.
+                    if b'"usage"' not in ligne and b'"model"' not in ligne:
+                        continue
+                    try:
+                        obj = json.loads(ligne)
+                    except ValueError:
+                        log.warning("ligne illisible ignorée dans %s", self.chemin.name)
+                        continue
+                    if isinstance(obj, dict):
+                        yield obj
         except FileNotFoundError:
-            return []
+            return
         except OSError:
             log.warning("fichier illisible ignoré : %s", self.chemin.name)
-            return []
-        fin = bloc.rfind(b"\n")
-        if fin < 0:
-            return []
-        self.decalage += fin + 1
-        objets = []
-        for brute in bloc[:fin].split(b"\n"):
-            if not brute.strip():
-                continue
-            try:
-                obj = json.loads(brute)
-            except ValueError:
-                log.warning("ligne illisible ignorée dans %s", self.chemin.name)
-                continue
-            if isinstance(obj, dict):
-                objets.append(obj)
-        return objets
+            return
 
 
 def _total(fichiers: Iterable[Fichier], depuis: float | None = None) -> int:

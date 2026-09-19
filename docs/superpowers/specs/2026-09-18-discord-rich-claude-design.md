@@ -4,7 +4,7 @@ Date : 2026-09-18 · Statut : validé en brainstorming, en attente de relecture
 
 ## 1. Objectif
 
-Quand une session Claude Code tourne sur la machine, le profil Discord affiche une carte « Joue à Claude Code » avec l'activité en cours, le modèle, les tokens et la durée. Le nom du projet n'apparaît que pour les projets explicitement autorisés.
+Quand une session Claude Code tourne sur la machine, le profil Discord affiche une carte « Joue à ClaudeCode » avec l'activité en cours, le modèle, les tokens et la durée. Le nom du projet n'apparaît que pour les projets explicitement autorisés.
 
 Usage personnel, macOS, Discord desktop installé.
 
@@ -97,7 +97,7 @@ Quand la liste des sous-agents se vide, la carte revient à l'activité du fil p
 ### 4.5 Plusieurs sessions
 
 - Session affichée : celle dont le dernier événement est le plus récent.
-- Compteur : nombre de sessions vivantes.
+- Compteur : nombre de sessions vivantes qui comptent pour la carte (voir « Masquage » ci-dessous).
 - Tokens de la session : ceux de la session affichée.
 - Cumul du jour : toutes les sessions, depuis minuit heure locale.
 - Zéro session vivante : la carte est effacée et la connexion à Discord fermée.
@@ -106,7 +106,7 @@ Quand la liste des sous-agents se vide, la carte revient à l'activité du fil p
 
 ```
 JOUE À
-Claude Code
+ClaudeCode
 [logo]  Écrit du code · DiscordRichClaude       ← details
         Opus 5 · 445 k tokens                    ← state, vue A
         01:23:45 écoulé                          ← timestamps.start
@@ -116,16 +116,18 @@ Claude Code
         3 sessions · 8,4 M aujourd'hui           ← state, vue B
 ```
 
-- Titre : nom de l'application Discord créée par Victor (« Claude Code »). Logo : image de l'application, clé d'asset `logo`.
+- Titre : nom de l'application Discord créée par Victor sur le Developer Portal. Le Portal refuse un nom avec une espace (erreur 50277, testé avec « Claude Code ») : le nom réel est `ClaudeCode` ou `Claude·Code`. Logo : image de l'application, clé d'asset `logo`.
 - `details` : activité (4.3), puis ` · <projet>` si le dossier est autorisé, sinon ` · Projet privé`.
 - `state`, vue A : `<modèle> · <tokens session> tokens`.
 - `state`, vue B : `<N> session(s) · <cumul du jour> aujourd'hui`.
-- Chrono : heure de début de la plus ancienne session vivante. Il ne saute pas quand la carte change de session. Après un redémarrage du daemon, le début d'une session reconstruite est l'heure du premier événement reçu.
+- Chrono : heure de début de la plus ancienne session qui compte pour la carte. Il ne saute pas quand la carte change de session. Après un redémarrage du daemon, le début d'une session reconstruite est l'heure du premier événement reçu.
 - Libellés en français, codés en dur.
 - Formats de nombre : `< 1 000` tel quel (`850`), `< 1 000 000` en milliers (`445 k`), au-delà en millions avec une décimale et virgule (`1,2 M`).
 - Nom du modèle : `claude-(opus|sonnet|haiku|fable)-X[-Y][-AAAAMMJJ]` → `<Famille> X` ou `<Famille> X.Y` (`claude-opus-5` → `Opus 5`, `claude-haiku-4-5-20251001` → `Haiku 4.5`). Identifiant inconnu : affiché sans le préfixe `claude-`. Modèle absent : vue A sans modèle.
 
 Envoi à Discord : seulement si la carte a changé, et pas plus d'une fois par intervalle minimal. La valeur de cet intervalle dépend de la limite de fréquence de Discord, vérifiée en L1 ; les mises à jour d'une rafale sont regroupées, la dernière gagne.
+
+Masquage : une session sans aucun événement (fil principal ou sous-agent) depuis `masquer_apres_min` (défaut 60) ne compte plus pour la carte : ni affichée, ni comptée, ni dans le chrono. Elle reste suivie tant que son processus vit et recompte au premier événement. Quand aucune session ne compte, la carte est effacée. Décision de Victor, 2026-09-18.
 
 ## 6. Tokens et modèle
 
@@ -146,6 +148,7 @@ Envoi à Discord : seulement si la carte a changé, et pas plus d'une fois par i
 ```toml
 client_id = "1234567890"      # ID de l'application Discord
 inactif_apres_min = 10
+masquer_apres_min = 60
 rotation_s = 20
 
 [projets]
@@ -184,11 +187,12 @@ Noms de fichiers, commandes, prompts, branche git, chemins. Un nom de projet uni
 
 - `uv tool install .` fournit la commande `discord-rich-claude` : `run`, `install`, `uninstall`, `status`.
 - `install` :
-  1. sauvegarde `~/.claude/settings.json` en `settings.json.bak-AAAAMMJJ-HHMMSS` ;
-  2. calcule l'ajout des hooks (section 4.1), affiche la différence, attend un « o » explicite ;
-  3. écrit en conservant les hooks existants d'autres outils. Idempotent : nos hooks sont reconnus à la présence de `discord-rich-claude` dans la commande ;
-  4. crée `~/Library/LaunchAgents/local.discord-rich-claude.plist` (`RunAtLoad`, `KeepAlive`, lance `discord-rich-claude run`) et le charge avec `launchctl bootstrap gui/<uid>` ;
-  5. crée la config avec une liste blanche vide si elle n'existe pas.
+  1. calcule l'ajout des hooks (section 4.1), affiche la différence, attend un « o » explicite ;
+  2. relit le fichier : s'il a changé pendant la confirmation, n'écrit rien et demande de relancer ; sinon le sauvegarde en `settings.json.bak-AAAAMMJJ-HHMMSS` (mêmes droits que l'original, jamais écrasée) ;
+  3. écrit de façon atomique, avec les droits de l'original, en conservant les hooks existants d'autres outils. Idempotent : nos hooks sont reconnus à la présence de `discord-rich-claude` dans la commande ;
+  4. crée la config avec une liste blanche vide si elle n'existe pas (droits 0600, jamais écrasée) ;
+  5. crée `~/Library/LaunchAgents/local.discord-rich-claude.plist` (`RunAtLoad`, `KeepAlive`, lance `discord-rich-claude run` par un chemin absolu) et le charge avec `launchctl bootstrap gui/<uid>`.
+- `install` et `uninstall` refusent de tourner en root.
 - `uninstall` : retire seulement nos hooks et le LaunchAgent (`launchctl bootout`). Garde la config.
 - `status` : daemon joignable ou non, Discord connecté ou non, sessions vivantes.
 - Commande d'un hook :
@@ -198,7 +202,7 @@ Noms de fichiers, commandes, prompts, branche git, chemins. Un nom de projet uni
   ```
 
   Hook synchrone, `timeout: 2`. `PreToolUse` avec le matcher `*`.
-- Étape manuelle, documentée dans le README : créer l'application « Claude Code » sur le Developer Portal de Discord, y déposer le logo sous la clé `logo`, copier l'Application ID dans `client_id`.
+- Étape manuelle, documentée dans le README : créer l'application sur le Developer Portal de Discord avec un nom sans espace (le Portal refuse une espace, erreur 50277 ; ex. `ClaudeCode` ou `Claude·Code`), y déposer le logo sous la clé `logo`, copier l'Application ID dans `client_id`.
 
 ## 9. Pannes et reprises
 
@@ -206,7 +210,7 @@ Noms de fichiers, commandes, prompts, branche git, chemins. Un nom de projet uni
 |---|---|
 | Discord fermé ou redémarré | Tant qu'une session est vivante, nouvel essai toutes les 15 s ; la carte courante est envoyée dès la reconnexion |
 | Daemon arrêté | `curl` échoue sans bruit, Claude n'est pas gêné ; le LaunchAgent relance le daemon, l'état se reconstruit (4.1) |
-| Ligne de transcript illisible | Ignorée, notée dans le log |
+| Ligne de transcript illisible | Ignorée ; notée dans le log si elle porte `usage` ou `model` (les autres lignes ne sont pas analysées) |
 | Erreur sur un événement | Notée dans le log, le daemon continue |
 | Config invalide | Refus par défaut (7.1) |
 

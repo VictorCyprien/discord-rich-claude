@@ -147,6 +147,61 @@ async def test_changement_de_client_id_reconnecte():
     assert journal[-4:] == ["effacer", "fermer", ("connecter", "43"), ("publier", A.details)]
 
 
+async def test_echecs_de_connexion_repetes_un_seul_warning_puis_debug(caplog):
+    """F3 : premier échec d'un type d'exception donné → WARNING (le type seul,
+    jamais str(e)) ; les échecs suivants du même type → DEBUG ; un changement de
+    type d'exception (toujours sans succès entre les deux) → un nouveau WARNING ;
+    la reconnexion réussie déclenche l'INFO déjà en place (« connecté à Discord »)."""
+
+    class ClientEchecPuisSucces:
+        def __init__(self, journal, client_id, exceptions):
+            self.journal, self.client_id, self._exceptions = journal, client_id, exceptions
+
+        async def connecter(self):
+            self.journal.append(("connecter", self.client_id))
+            if self._exceptions:
+                raise self._exceptions.pop(0)
+
+        async def publier(self, carte):
+            self.journal.append(("publier", carte.details))
+
+        async def effacer(self):
+            self.journal.append("effacer")
+
+        async def fermer(self):
+            self.journal.append("fermer")
+
+    exceptions = [ConnectionRefusedError("Discord fermé")] * 5 + [TimeoutError("trop long")]
+    journal, h = [], Horloge()
+    p = Presence(
+        lambda cid: ClientEchecPuisSucces(journal, cid, exceptions),
+        intervalle_min_s=15,
+        reessai_s=0,
+        horloge=h,
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="discord_rich_claude.presence"):
+        for i in range(7):  # 5 x ConnectionRefusedError, 1 x TimeoutError, puis succès
+            h.t = i
+            await p.soumettre(A, "42")
+
+    avertissements = [r for r in caplog.records if r.levelno == logging.WARNING]
+    debogages = [r for r in caplog.records if r.levelno == logging.DEBUG]
+    infos = [r for r in caplog.records if r.levelno == logging.INFO]
+
+    assert len(avertissements) == 2
+    assert "ConnectionRefusedError" in avertissements[0].getMessage()
+    assert "TimeoutError" in avertissements[1].getMessage()
+    assert len(debogages) == 4  # les 4 répétitions de ConnectionRefusedError
+
+    for record in avertissements + debogages:
+        assert "Discord fermé" not in record.getMessage()
+        assert "trop long" not in record.getMessage()
+
+    assert any("connecté à Discord" in r.getMessage() for r in infos)
+    assert p.connecte
+
+
 @pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
 async def test_client_pypresence_ferme_sans_fermer_la_boucle(monkeypatch):
     """ClientPypresence.fermer() contre un faux serveur IPC Discord (aucun réseau,
