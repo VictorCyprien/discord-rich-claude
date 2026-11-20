@@ -1,0 +1,52 @@
+[package]
+name = "discord-rich-claude"
+version = "0.1.0"
+edition = "2024"
+description = "Discord Rich Presence pour Claude Code"
+license = "MIT"
+
+[lib]
+name = "discord_rich_claude"
+path = "src/lib.rs"
+
+[[bin]]
+name = "discord-rich-claude"
+path = "src/main.rs"
+
+[[example]]
+name = "sonde_discord"
+required-features = ["discord"]
+
+[features]
+default = ["menu", "discord"]
+menu = ["dep:tray-icon", "dep:tao", "dep:ctrlc"]
+discord = ["dep:discord-presence"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+indexmap = { version = "2", features = ["serde"] }
+toml = "0.8"
+chrono = "0.4"
+similar = "2"
+libc = "0.2"
+log = "0.4"
+discord-presence = { version = "3.2", optional = true }
+tray-icon = { version = "0.19", optional = true }
+tao = { version = "0.31", optional = true }
+ctrlc = { version = "3", features = ["termination"], optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Les dépendances de la liste fermée sont déclarées dès le squelette ; les
+# modules qui les utilisent arrivent dans les tâches suivantes.
+[lints.cargo]
+unused_dependencies = "allow"
