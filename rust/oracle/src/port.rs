@@ -9,20 +9,18 @@
 
 /// Port of `formater_nombre` (`src/discord_rich_claude/carte.py:31`).
 pub fn formater_nombre(n: i64) -> Result<String, String> {
-    let _ = &n;
-    Err("non porté".into())
+    Ok(discord_rich_claude::carte::formater_nombre(n))
 }
 
 /// Port of `nom_modele` (`src/discord_rich_claude/carte.py:39`).
 pub fn nom_modele(model_id: Option<String>) -> Result<Option<String>, String> {
-    let _ = &model_id;
-    Err("non porté".into())
+    Ok(discord_rich_claude::carte::nom_modele(model_id.as_deref()))
 }
 
 /// Port of `est_vue_b` (`src/discord_rich_claude/carte.py:80`).
 pub fn est_vue_b(maintenant: f64, rotation_s: f64) -> Result<bool, String> {
-    let _ = (&maintenant, &rotation_s);
-    Err("non porté".into())
+    discord_rich_claude::carte::est_vue_b_strict(maintenant, rotation_s)
+        .map_err(|nom| format!("{nom}: division impossible"))
 }
 
 /// Port of `ajouter_hooks` (`src/discord_rich_claude/installation.py:53`).
