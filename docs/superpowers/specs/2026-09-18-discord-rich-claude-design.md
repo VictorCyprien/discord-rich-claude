@@ -2,6 +2,8 @@
 
 Date : 2026-09-18 · Statut : validé en brainstorming, en attente de relecture
 
+Amendement du 2026-11-20 (section 14) : réécriture en Rust et widget de barre de menus. Là où une section 2 à 13 contredit la section 14, la section 14 l'emporte.
+
 ## 1. Objectif
 
 Quand une session Claude Code tourne sur la machine, le profil Discord affiche une carte « Joue à ClaudeCode » avec l'activité en cours, le modèle, les tokens et la durée. Le nom du projet n'apparaît que pour les projets explicitement autorisés.
@@ -14,7 +16,7 @@ Usage personnel, macOS, Discord desktop installé.
 |---|---|---|
 | Réutiliser un projet existant | Non, on code le nôtre | 5 projets évalués (rar-file/claude-rpc, BrunoJurkovic/claude-code-discord-status, tsanva et Jerit3787/cc-discord-presence, StealthyLabsHQ/claude-rpc) : aucun n'a de liste blanche de projets. Le plus proche (rar-file) a une liste noire et envoie des statistiques à un serveur tiers par défaut. |
 | Architecture | Hooks Claude Code + daemon local | Un hook seul ne peut pas tenir la carte : Discord l'efface quand la connexion IPC se ferme. Les hooks donnent un état exact et immédiat. |
-| Langage | Python 3.13, uv, asyncio, pypresence | Stack maîtrisée, relisible. Go aurait un binaire unique et moins de RAM, gain négligeable en usage perso. |
+| Langage | Python 3.13, uv, asyncio, pypresence (remplacé par Rust, voir 14.1) | Stack maîtrisée, relisible. Go aurait un binaire unique et moins de RAM, gain négligeable en usage perso. |
 | Transport hook → daemon | `curl` sur socket Unix, hooks **synchrones** | Garantit l'ordre des événements (un `Stop` ne peut pas arriver avant le dernier `PreToolUse`). Coût attendu ~10 ms par événement, à mesurer en L1. |
 | Nom du projet | Liste blanche, refusé par défaut | Aucun nom de projet client ne peut sortir par erreur. |
 | Plusieurs sessions | La carte suit la session la plus récemment active, avec un compteur | |
@@ -209,7 +211,7 @@ Noms de fichiers, commandes, prompts, branche git, chemins. Un nom de projet uni
 | Panne | Comportement |
 |---|---|
 | Discord fermé ou redémarré | Tant qu'une session est vivante, nouvel essai toutes les 15 s ; la carte courante est envoyée dès la reconnexion |
-| Daemon arrêté | `curl` échoue sans bruit, Claude n'est pas gêné ; le LaunchAgent relance le daemon, l'état se reconstruit (4.1) |
+| Daemon arrêté | `curl` échoue sans bruit, Claude n'est pas gêné ; l'état se reconstruit (4.1) au prochain lancement. Depuis 14.4, le LaunchAgent n'a plus `KeepAlive` : un crash n'est pas relancé tout seul |
 | Ligne de transcript illisible | Ignorée ; notée dans le log si elle porte `usage` ou `model` (les autres lignes ne sont pas analysées) |
 | Erreur sur un événement | Notée dans le log, le daemon continue |
 | Config invalide | Refus par défaut (7.1) |
@@ -268,3 +270,44 @@ Si une hypothèse tombe, le design de la section concernée est revu avant L2.
 ## 13. Hors périmètre
 
 Windows et Linux, Claude Desktop, coût en dollars, branche git, boutons sur la carte, petites icônes par activité, statistiques historiques (semaine, total), commande pour gérer la liste blanche, distribution publique.
+
+Ajouts de la section 14 : Intel et binaire universel, notarisation, widget WidgetKit, commandes CLI `pause` / `resume`.
+
+## 14. Amendement du 2026-11-20 : Rust et widget de barre de menus
+
+### 14.1 Réécriture en Rust
+
+- Un seul binaire Rust, cible `aarch64-apple-darwin`. Raisons : démarrage et mémoire au repos plus faibles, taille de l'installation réduite, pas de Python ni de `uv` à l'exécution, et apprendre Rust.
+- Threads et canaux (`std` ou `crossbeam-channel`), sans tokio. Le fil principal appartient à la boucle d'événements de la barre de menus (macOS l'exige).
+- Discord : crate `discord-presence` 3.2 (threadée, reconnexion intégrée). Un spike le vérifie avant le portage : connexion, `set_activity`, `clear_activity`, reconnexion après redémarrage de Discord, intervalle de 15 s (hypothèse 6). Si le spike échoue : IPC écrit à la main.
+- Comportement identique à Python : `config.toml` (mêmes clés), chemin du socket, routes `POST /event` et `GET /etat`, en-tête `X-Claude-Pid`, liste fermée de champs (7.3), libellés (section 5), commande de hook (section 8), journal.
+- Portage unité par unité avec `rust-anything` : la suite pytest et les cas enregistrés servent de référence, une unité n'est finie que si sa preuve passe. Le Python reste jusqu'à parité (tests d'intégration socket et `curl` repris en Rust), puis il est supprimé.
+- Les règles de `CLAUDE.md` valent pour le Rust : `sessions` et `carte` sans entrée-sortie, tests sans Discord réel, sans vrais chemins utilisateur, sans vrai `launchctl`.
+
+### 14.2 États
+
+Trois états, tenus en mémoire. Au lancement du daemon (login compris), l'état est toujours « Allumé » : aucun état n'est mémorisé sur disque.
+
+| État | Discord | Hooks reçus | Carte |
+|---|---|---|---|
+| Allumé | connecté quand une session compte (comportement 5 et 9) | suivis | affichée |
+| En pause | connexion gardée si déjà ouverte | suivis, les sessions restent à jour | effacée |
+| Arrêté | connexion fermée | répondus `204` et ignorés, rien gardé | aucune |
+
+- Reprise depuis « En pause » : la carte courante est renvoyée aussitôt (dans la limite de 15 s de 5).
+- Reprise depuis « Arrêté » : l'état se reconstruit au fil de l'eau (4.1).
+- `GET /etat` renvoie aussi `"etat": "allume" | "pause" | "arrete"`, et `status` l'affiche.
+
+### 14.3 Barre de menus
+
+- Bibliothèques : `tray-icon`, `tao`, `muda`.
+- Menu : une ligne d'état grisée (« Allumé », « En pause », « Arrêté »), puis « Allumer », « Mettre en pause », « Arrêter », un séparateur, « Quitter ». « Quitter » ferme le daemon ; il ne le relance pas.
+- Icône : trois variantes (une par état), monochromes en mode « template » pour suivre le thème clair ou sombre.
+- Confidentialité : le menu n'affiche aucun nom de projet, de session ni de chemin.
+
+### 14.4 Installation et démarrage
+
+- `install` crée `~/Applications/Discord Rich Claude.app` : un bundle minimal avec `Info.plist` (`LSUIElement` à vrai, pas d'icône dans le Dock) et le binaire. Signature ad hoc (`codesign -s -`), sans notarisation.
+- Le LaunchAgent lance le binaire du bundle, avec `RunAtLoad` et sans `KeepAlive`, pour que « Quitter » ne le relance pas.
+- `uninstall` retire nos hooks, le LaunchAgent et le bundle ; il garde la config. Le « o » explicite sur `settings.json`, le refus de tourner en root, les sauvegardes et les droits de 8 ne changent pas.
+- CLI : `run`, `install`, `uninstall`, `status`. Pas de `pause` ni `resume` en ligne de commande : seul le menu change l'état.
