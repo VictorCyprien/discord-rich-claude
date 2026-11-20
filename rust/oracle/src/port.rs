@@ -58,18 +58,27 @@ pub fn libelle_outil(tool_name: Option<String>) -> Result<String, String> {
 
 /// Port of `minuit_local` (`src/discord_rich_claude/tokens.py:29`).
 pub fn minuit_local(maintenant: f64) -> Result<f64, String> {
-    let _ = &maintenant;
-    Err("non porté".into())
+    discord_rich_claude::tokens::minuit_local_strict(maintenant)
+        .map_err(|nom| format!("{nom}: horodatage hors limites"))
 }
 
 /// Port of `extraire` (`src/discord_rich_claude/tokens.py:51`).
 pub fn extraire(obj: serde_json::Value) -> Result<Option<serde_json::Value>, String> {
-    let _ = &obj;
-    Err("non porté".into())
+    let extrait = discord_rich_claude::tokens::extraire_strict(&obj)
+        .map_err(|nom| format!("{nom}: 'objet' sans attribut 'get'"))?;
+    Ok(extrait.map(|((id, requete), moment, tokens)| {
+        let champs: serde_json::Map<String, serde_json::Value> =
+            discord_rich_claude::tokens::CHAMPS_COMPTES
+                .iter()
+                .zip(tokens)
+                .map(|(k, v)| ((*k).to_string(), serde_json::Value::from(v)))
+                .collect();
+        serde_json::json!({"$tuple": [{"$tuple": [id, requete]}, moment, champs]})
+    }))
 }
 
 /// Port of `modele_de` (`src/discord_rich_claude/tokens.py:67`).
 pub fn modele_de(obj: serde_json::Value) -> Result<Option<String>, String> {
-    let _ = &obj;
-    Err("non porté".into())
+    discord_rich_claude::tokens::modele_de_strict(&obj)
+        .map_err(|nom| format!("{nom}: 'objet' sans attribut 'get'"))
 }
