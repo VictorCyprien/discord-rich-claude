@@ -55,8 +55,7 @@ pub fn filtrer(
 
 /// Port of `libelle_outil` (`src/discord_rich_claude/sessions.py:53`).
 pub fn libelle_outil(tool_name: Option<String>) -> Result<String, String> {
-    let _ = &tool_name;
-    Err("non porté".into())
+    Ok(discord_rich_claude::sessions::libelle_outil(tool_name.as_deref()).to_string())
 }
 
 /// Port of `minuit_local` (`src/discord_rich_claude/tokens.py:29`).
