@@ -19,21 +19,9 @@ pub fn nom_modele(model_id: Option<String>) -> Result<Option<String>, String> {
     Err("non porté".into())
 }
 
-/// Port of `nom_projet` (`src/discord_rich_claude/carte.py:60`).
-pub fn nom_projet(cwd: Option<String>, autorises: serde_json::Value) -> Result<String, String> {
-    let _ = (&cwd, &autorises);
-    Err("non porté".into())
-}
-
 /// Port of `est_vue_b` (`src/discord_rich_claude/carte.py:80`).
 pub fn est_vue_b(maintenant: f64, rotation_s: f64) -> Result<bool, String> {
     let _ = (&maintenant, &rotation_s);
-    Err("non porté".into())
-}
-
-/// Port of `charger` (`src/discord_rich_claude/config.py:25`).
-pub fn charger(chemin: serde_json::Value) -> Result<serde_json::Value, String> {
-    let _ = &chemin;
     Err("non porté".into())
 }
 
@@ -51,12 +39,6 @@ pub fn ajouter_hooks(
 /// Port of `retirer_hooks` (`src/discord_rich_claude/installation.py:71`).
 pub fn retirer_hooks(settings: serde_json::Value) -> Result<serde_json::Value, String> {
     let _ = &settings;
-    Err("non porté".into())
-}
-
-/// Port of `transcript_autorise` (`src/discord_rich_claude/serveur.py:45`).
-pub fn transcript_autorise(chemin: String, racine: serde_json::Value) -> Result<bool, String> {
-    let _ = (&chemin, &racine);
     Err("non porté".into())
 }
 
@@ -80,14 +62,6 @@ pub fn libelle_outil(tool_name: Option<String>) -> Result<String, String> {
 /// Port of `minuit_local` (`src/discord_rich_claude/tokens.py:29`).
 pub fn minuit_local(maintenant: f64) -> Result<f64, String> {
     let _ = &maintenant;
-    Err("non porté".into())
-}
-
-/// Port of `fichiers_de_session` (`src/discord_rich_claude/tokens.py:37`).
-pub fn fichiers_de_session(
-    transcript: serde_json::Value,
-) -> Result<Vec<serde_json::Value>, String> {
-    let _ = &transcript;
     Err("non porté".into())
 }
 

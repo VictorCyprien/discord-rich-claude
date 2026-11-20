@@ -43,30 +43,6 @@
       "uses_instanceof": false
     },
     {
-      "name": "nom_projet",
-      "file": "src/discord_rich_claude/carte.py",
-      "line": 60,
-      "params": [
-        {
-          "name": "cwd",
-          "ts_type": "string | undefined",
-          "optional": false,
-          "rest": false
-        },
-        {
-          "name": "autorises",
-          "ts_type": "tuple",
-          "optional": false,
-          "rest": false
-        }
-      ],
-      "returns": "string",
-      "is_async": false,
-      "is_generator": false,
-      "type_params": [],
-      "uses_instanceof": false
-    },
-    {
       "name": "est_vue_b",
       "file": "src/discord_rich_claude/carte.py",
       "line": 80,
@@ -85,24 +61,6 @@
         }
       ],
       "returns": "boolean",
-      "is_async": false,
-      "is_generator": false,
-      "type_params": [],
-      "uses_instanceof": false
-    },
-    {
-      "name": "charger",
-      "file": "src/discord_rich_claude/config.py",
-      "line": 25,
-      "params": [
-        {
-          "name": "chemin",
-          "ts_type": "Path",
-          "optional": false,
-          "rest": false
-        }
-      ],
-      "returns": "Config",
       "is_async": false,
       "is_generator": false,
       "type_params": [],
@@ -146,30 +104,6 @@
         }
       ],
       "returns": "dict",
-      "is_async": false,
-      "is_generator": false,
-      "type_params": [],
-      "uses_instanceof": false
-    },
-    {
-      "name": "transcript_autorise",
-      "file": "src/discord_rich_claude/serveur.py",
-      "line": 45,
-      "params": [
-        {
-          "name": "chemin",
-          "ts_type": "string",
-          "optional": false,
-          "rest": false
-        },
-        {
-          "name": "racine",
-          "ts_type": "Path",
-          "optional": false,
-          "rest": false
-        }
-      ],
-      "returns": "boolean",
       "is_async": false,
       "is_generator": false,
       "type_params": [],
@@ -248,24 +182,6 @@
       "uses_instanceof": false
     },
     {
-      "name": "fichiers_de_session",
-      "file": "src/discord_rich_claude/tokens.py",
-      "line": 37,
-      "params": [
-        {
-          "name": "transcript",
-          "ts_type": "Path",
-          "optional": false,
-          "rest": false
-        }
-      ],
-      "returns": "Path[]",
-      "is_async": false,
-      "is_generator": false,
-      "type_params": [],
-      "uses_instanceof": false
-    },
-    {
       "name": "extraire",
       "file": "src/discord_rich_claude/tokens.py",
       "line": 51,
@@ -304,6 +220,12 @@
   ],
   "classes": [],
   "js_only": [
+    {
+      "name": "nom_projet",
+      "file": "src/discord_rich_claude/carte.py",
+      "line": 60,
+      "reason": "dépend du disque"
+    },
     {
       "name": "construire_carte",
       "file": "src/discord_rich_claude/carte.py",
@@ -351,6 +273,12 @@
       "file": "src/discord_rich_claude/cli.py",
       "line": 176,
       "reason": "CLI"
+    },
+    {
+      "name": "charger",
+      "file": "src/discord_rich_claude/config.py",
+      "line": 25,
+      "reason": "dépend du disque"
     },
     {
       "name": "creer_config_par_defaut",
@@ -425,6 +353,12 @@
       "reason": "class: `@property` method `connecte`, async or generator method `fermer`, async or generator method `soumettre`"
     },
     {
+      "name": "transcript_autorise",
+      "file": "src/discord_rich_claude/serveur.py",
+      "line": 45,
+      "reason": "dépend du disque"
+    },
+    {
       "name": "demarrer_serveur",
       "file": "src/discord_rich_claude/serveur.py",
       "line": 210,
@@ -471,6 +405,12 @@
       "file": "src/discord_rich_claude/sessions.py",
       "line": 78,
       "reason": "class: public attribute `sessions`"
+    },
+    {
+      "name": "fichiers_de_session",
+      "file": "src/discord_rich_claude/tokens.py",
+      "line": 37,
+      "reason": "dépend du disque"
     },
     {
       "name": "Entree",

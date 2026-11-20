@@ -56,19 +56,6 @@ fn nom_modele(model_id: Option<String>) -> PyResult<Option<String>> {
     nom_modele_inner(model_id).map_err(error)
 }
 
-fn nom_projet_inner(cwd: Option<String>, autorises: Bound<'_, PyAny>) -> Result<String, String> {
-    let autorises: serde_json::Value = crate::pyconv::FromPy::from_py(&autorises)?;
-    let out = port::nom_projet(cwd, autorises)?;
-    Ok(out)
-}
-
-/// `nom_projet`.
-#[pyfunction]
-#[pyo3(name = "nom_projet", signature = (cwd, autorises))]
-fn nom_projet(cwd: Option<String>, autorises: Bound<'_, PyAny>) -> PyResult<String> {
-    nom_projet_inner(cwd, autorises).map_err(error)
-}
-
 fn est_vue_b_inner(maintenant: f64, rotation_s: f64) -> Result<bool, String> {
     let out = port::est_vue_b(maintenant, rotation_s)?;
     Ok(out)
@@ -79,21 +66,6 @@ fn est_vue_b_inner(maintenant: f64, rotation_s: f64) -> Result<bool, String> {
 #[pyo3(name = "est_vue_b", signature = (maintenant, rotation_s))]
 fn est_vue_b(maintenant: f64, rotation_s: f64) -> PyResult<bool> {
     est_vue_b_inner(maintenant, rotation_s).map_err(error)
-}
-
-fn charger_inner(chemin: Bound<'_, PyAny>) -> Result<serde_json::Value, String> {
-    let chemin: serde_json::Value = crate::pyconv::FromPy::from_py(&chemin)?;
-    let out = port::charger(chemin)?;
-    Ok(out)
-}
-
-/// `charger`.
-#[pyfunction]
-#[pyo3(name = "charger", signature = (chemin))]
-fn charger(py: Python<'_>, chemin: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-    charger_inner(chemin)
-        .map_err(error)
-        .and_then(|v| crate::pyconv::ToPy::to_py(&v, py))
 }
 
 fn ajouter_hooks_inner(
@@ -131,19 +103,6 @@ fn retirer_hooks(py: Python<'_>, settings: Bound<'_, PyAny>) -> PyResult<Py<PyAn
     retirer_hooks_inner(settings)
         .map_err(error)
         .and_then(|v| crate::pyconv::ToPy::to_py(&v, py))
-}
-
-fn transcript_autorise_inner(chemin: String, racine: Bound<'_, PyAny>) -> Result<bool, String> {
-    let racine: serde_json::Value = crate::pyconv::FromPy::from_py(&racine)?;
-    let out = port::transcript_autorise(chemin, racine)?;
-    Ok(out)
-}
-
-/// `transcript_autorise`.
-#[pyfunction]
-#[pyo3(name = "transcript_autorise", signature = (chemin, racine))]
-fn transcript_autorise(chemin: String, racine: Bound<'_, PyAny>) -> PyResult<bool> {
-    transcript_autorise_inner(chemin, racine).map_err(error)
 }
 
 fn filtrer_inner(
@@ -197,23 +156,6 @@ fn minuit_local(maintenant: f64) -> PyResult<f64> {
     minuit_local_inner(maintenant).map_err(error)
 }
 
-fn fichiers_de_session_inner(
-    transcript: Bound<'_, PyAny>,
-) -> Result<Vec<serde_json::Value>, String> {
-    let transcript: serde_json::Value = crate::pyconv::FromPy::from_py(&transcript)?;
-    let out = port::fichiers_de_session(transcript)?;
-    Ok(out)
-}
-
-/// `fichiers_de_session`.
-#[pyfunction]
-#[pyo3(name = "fichiers_de_session", signature = (transcript))]
-fn fichiers_de_session(py: Python<'_>, transcript: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-    fichiers_de_session_inner(transcript)
-        .map_err(error)
-        .and_then(|v| crate::pyconv::ToPy::to_py(&v, py))
-}
-
 fn extraire_inner(obj: Bound<'_, PyAny>) -> Result<Option<serde_json::Value>, String> {
     let obj: serde_json::Value = crate::pyconv::FromPy::from_py(&obj)?;
     let out = port::extraire(obj)?;
@@ -247,16 +189,12 @@ fn modele_de(obj: Bound<'_, PyAny>) -> PyResult<Option<String>> {
 fn native_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(formater_nombre, m)?)?;
     m.add_function(wrap_pyfunction!(nom_modele, m)?)?;
-    m.add_function(wrap_pyfunction!(nom_projet, m)?)?;
     m.add_function(wrap_pyfunction!(est_vue_b, m)?)?;
-    m.add_function(wrap_pyfunction!(charger, m)?)?;
     m.add_function(wrap_pyfunction!(ajouter_hooks, m)?)?;
     m.add_function(wrap_pyfunction!(retirer_hooks, m)?)?;
-    m.add_function(wrap_pyfunction!(transcript_autorise, m)?)?;
     m.add_function(wrap_pyfunction!(filtrer, m)?)?;
     m.add_function(wrap_pyfunction!(libelle_outil, m)?)?;
     m.add_function(wrap_pyfunction!(minuit_local, m)?)?;
-    m.add_function(wrap_pyfunction!(fichiers_de_session, m)?)?;
     m.add_function(wrap_pyfunction!(extraire, m)?)?;
     m.add_function(wrap_pyfunction!(modele_de, m)?)?;
     Ok(())

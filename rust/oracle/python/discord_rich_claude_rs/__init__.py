@@ -89,17 +89,13 @@ def _method(name, positions, names, json_result):
 
 formater_nombre = _native.formater_nombre
 nom_modele = _native.nom_modele
-nom_projet = _native.nom_projet
 est_vue_b = _native.est_vue_b
-charger = _native.charger
 ajouter_hooks = _native.ajouter_hooks
 retirer_hooks = _native.retirer_hooks
-transcript_autorise = _native.transcript_autorise
 filtrer = _native.filtrer
 libelle_outil = _native.libelle_outil
 minuit_local = _native.minuit_local
-fichiers_de_session = _native.fichiers_de_session
 extraire = _native.extraire
 modele_de = _native.modele_de
 
-__all__ = ['formater_nombre', 'nom_modele', 'nom_projet', 'est_vue_b', 'charger', 'ajouter_hooks', 'retirer_hooks', 'transcript_autorise', 'filtrer', 'libelle_outil', 'minuit_local', 'fichiers_de_session', 'extraire', 'modele_de']
+__all__ = ['formater_nombre', 'nom_modele', 'est_vue_b', 'ajouter_hooks', 'retirer_hooks', 'filtrer', 'libelle_outil', 'minuit_local', 'extraire', 'modele_de']
