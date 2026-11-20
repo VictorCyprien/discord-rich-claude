@@ -3,6 +3,8 @@
 pub mod carte;
 pub mod chemins;
 pub mod config;
+pub mod daemon;
+pub mod journal;
 pub mod presence;
 pub mod serveur;
 pub mod sessions;
