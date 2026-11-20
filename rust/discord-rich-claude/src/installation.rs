@@ -179,6 +179,16 @@ fn erreur_io(action: &str, e: &io::Error) -> String {
     format!("{action} impossible ({:?})", e.kind())
 }
 
+/// Ouvre un fichier neuf en écriture, exclusivement, directement au `mode`
+/// voulu (l'umask ne peut qu'enlever des droits, jamais en ajouter).
+fn ouvrir_exclusif(chemin: &Path, mode: u32) -> io::Result<fs::File> {
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(mode)
+        .open(chemin)
+}
+
 /// Sauvegarde exclusive : jamais d'écrasement d'une sauvegarde existante.
 ///
 /// Créée directement au mode voulu (`.mode()`), puis `set_permissions` avant
@@ -198,12 +208,7 @@ fn sauvegarder(chemin: &Path, contenu: &[u8], mode: u32, horloge: NaiveDateTime)
             format!("{base}-{suffixe}")
         };
         let cible = chemin.with_file_name(candidat);
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(mode)
-            .open(&cible)
-        {
+        match ouvrir_exclusif(&cible, mode) {
             Ok(mut f) => {
                 f.set_permissions(fs::Permissions::from_mode(mode))?;
                 f.write_all(contenu)?;
@@ -228,12 +233,7 @@ fn creer_temporaire(cible: &Path, prefixe: &str, mode: u32) -> io::Result<(fs::F
             .wrapping_mul(2_654_435_761)
             .wrapping_add(essai.wrapping_mul(40_503));
         let chemin = dossier.join(format!("{prefixe}{pid:x}{alea:08x}.tmp"));
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(mode)
-            .open(&chemin)
-        {
+        match ouvrir_exclusif(&chemin, mode) {
             Ok(f) => return Ok((f, chemin)),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e),
@@ -817,6 +817,24 @@ mod tests {
     }
 
     #[test]
+    fn test_modifier_settings_sauvegarde_deja_au_bon_mode_des_la_creation() {
+        // Garde F7 : sous umask 000, un fichier créé sans `.mode()` naîtrait en
+        // 0666. On lit le mode juste après l'ouverture, sans `set_permissions`.
+        let _v = VERROU_UMASK.lock().unwrap_or_else(|e| e.into_inner());
+        let _u = GardeUmask::poser(0o000);
+        let d = tempfile::tempdir().unwrap();
+        // Sauvegarde : ouverture exclusive partagée par `sauvegarder`.
+        let chemin = d.path().join("settings.json.bak");
+        let f = ouvrir_exclusif(&chemin, 0o600).unwrap();
+        assert_eq!(f.metadata().unwrap().permissions().mode() & 0o7777, 0o600);
+        // Temporaire de réécriture.
+        let (f, tmp) =
+            creer_temporaire(&d.path().join("settings.json"), ".settings.json.", 0o600).unwrap();
+        assert_eq!(f.metadata().unwrap().permissions().mode() & 0o7777, 0o600);
+        assert_eq!(mode(&tmp), 0o600);
+    }
+
+    #[test]
     fn modifier_settings_deux_sauvegardes_meme_seconde_ne_s_ecrasent_pas() {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("settings.json");
@@ -839,7 +857,7 @@ mod tests {
     }
 
     #[test]
-    fn ecriture_atomique_echec_ne_laisse_pas_de_fichier_temporaire() {
+    fn test_modifier_settings_echec_a_l_ecriture_ne_laisse_pas_de_fichier_temporaire() {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("settings.json");
         fs::write(&f, "initial").unwrap();
@@ -852,15 +870,27 @@ mod tests {
     }
 
     #[test]
-    fn retirer_laisse_intacte_une_valeur_d_evenement_qui_n_est_pas_une_liste() {
-        for s in [
-            json!({"hooks": {"Stop": {"matcher": "x", "hooks": [tiers()]}}}),
-            json!({"hooks": {"Stop": "abc"}}),
-            json!({"hooks": {"Stop": ["pas-un-objet"]}}),
-            json!({"hooks": {"Stop": [{"hooks": null}]}}),
-        ] {
-            assert_eq!(retirer_hooks(&s).unwrap(), s);
-        }
+    fn test_retirer_laisse_intacte_une_valeur_d_evenement_qui_est_un_objet() {
+        let s = json!({"hooks": {"Stop": {"matcher": "x", "hooks": [tiers()]}}});
+        assert_eq!(retirer_hooks(&s).unwrap(), s);
+    }
+
+    #[test]
+    fn test_retirer_laisse_intacte_une_valeur_d_evenement_qui_est_une_chaine() {
+        let s = json!({"hooks": {"Stop": "abc"}});
+        assert_eq!(retirer_hooks(&s).unwrap(), s);
+    }
+
+    #[test]
+    fn test_retirer_laisse_intact_un_groupe_qui_n_est_pas_un_objet() {
+        let s = json!({"hooks": {"Stop": ["pas-un-objet"]}});
+        assert_eq!(retirer_hooks(&s).unwrap(), s);
+    }
+
+    #[test]
+    fn test_retirer_laisse_intact_un_groupe_dont_les_hooks_ne_sont_pas_une_liste() {
+        let s = json!({"hooks": {"Stop": [{"hooks": null}]}});
+        assert_eq!(retirer_hooks(&s).unwrap(), s);
     }
 
     #[test]
@@ -905,7 +935,7 @@ mod tests {
     }
 
     #[test]
-    fn generer_plist_format_plistlib() {
+    fn test_generer_plist() {
         let t = texte(&generer_plist(
             Path::new("/u/bin/discord-rich-claude"),
             Path::new("/l"),
@@ -954,7 +984,7 @@ mod tests {
     }
 
     #[test]
-    fn installer_launch_agent_appelle_bootout_puis_bootstrap() {
+    fn test_installer_launch_agent() {
         let d = tempfile::tempdir().unwrap();
         let chemin = d.path().join("LaunchAgents").join(format!("{LABEL}.plist"));
         let mut appels = vec![];
@@ -987,7 +1017,7 @@ mod tests {
     }
 
     #[test]
-    fn desinstaller_launch_agent_retire_le_plist() {
+    fn test_desinstaller_launch_agent() {
         let d = tempfile::tempdir().unwrap();
         let chemin = d.path().join(format!("{LABEL}.plist"));
         fs::write(&chemin, b"<plist/>").unwrap();
