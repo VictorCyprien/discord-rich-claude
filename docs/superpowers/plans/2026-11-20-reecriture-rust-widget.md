@@ -6,7 +6,7 @@
 
 **Architecture :** une crate Rust `rust/discord-rich-claude` (lib + bin) reprend les modules Python un pour un, avec des threads et sans async. Une seconde crate, `rust/oracle`, est générée par `rust-anything bridge`. Elle rejoue contre la lib Rust le comportement enregistré des fonctions pures Python : c'est la preuve d'équivalence. Les parties à entrées-sorties (socket, Discord, launchctl, UI) sont prouvées par les tests pytest portés en Rust. Le Python reste jusqu'à la parité, puis il est supprimé (tâche 13).
 
-**Stack :** Rust édition 2024 (rustc 1.100), cible `aarch64-apple-darwin`, `discord-presence` 3.2, `tray-icon` + `tao`, `rust-anything` (MCP et CLI déjà installés).
+**Stack :** Rust édition 2024 (rustc 1.100), cible `aarch64-apple-darwin`, IPC Discord écrit à la main (spike du 2026-11-20), `tray-icon` + `tao`, `rust-anything` (MCP et CLI déjà installés).
 
 **Spec :** `docs/superpowers/specs/2026-09-18-discord-rich-claude-design.md`, sections 1 à 13 pour le comportement et section 14 pour ce qui change. La spec fait foi.
 
@@ -14,8 +14,8 @@
 
 - Tout en français : identifiants, tests, libellés, messages de log, commits (`CLAUDE.md`). Rien n'est traduit.
 - Pas de tokio, ni d'async. Threads et `std::sync::mpsc` (ou `crossbeam-channel` si la crate Discord l'apporte déjà).
-- Liste fermée de crates. Exécution : `serde` (derive), `serde_json` (feature `preserve_order`), `indexmap`, `toml`, `chrono`, `similar`, `libc`, `log`, `discord-presence` 3.2 (feature Cargo `discord`), `tray-icon`, `tao`, `ctrlc` avec la feature `termination` (feature Cargo `menu`). Tests : `tempfile`. Toute autre crate demande l'accord de Victor.
-- Features de la lib : `default = ["menu", "discord"]`. `rust/oracle` dépend de la lib avec `default-features = false`.
+- Liste fermée de crates. Exécution : `serde` (derive), `serde_json` (feature `preserve_order`), `indexmap`, `toml`, `chrono`, `similar`, `libc`, `log`, `tray-icon`, `tao`, `ctrlc` avec la feature `termination` (feature Cargo `menu`). Tests : `tempfile`. Toute autre crate demande l'accord de Victor.
+- Features de la lib : `default = ["menu"]` (la feature `discord` et la crate `discord-presence` sont retirées en tâche 8, spike du 2026-11-20). `rust/oracle` dépend de la lib avec `default-features = false`.
 - Aucun accès réseau.
 - Confidentialité inchangée (spec 7.3 à 7.5). On garde seulement `session_id`, `cwd`, `hook_event_name`, `tool_name`, `agent_id`, `transcript_path` et l'en-tête `X-Claude-Pid`. Jamais de prompt, de `tool_input` ni de chemin de fichier édité dans un log, sur Discord ou dans le menu. Là où Python logge `type(e).__name__`, Rust logge le genre de l'erreur (`io::ErrorKind` ou un `&'static str`), jamais son `Display`.
 - Libellés codés en dur, copiés à l'identique depuis le Python (`sessions.py`, `carte.py`, `cli.py`) et la spec 14.2/14.3. Jamais improvisés.
@@ -69,7 +69,7 @@ rust/discord-rich-claude/
   src/carte.rs             Carte, Stats, construire_carte (pur, sauf le cache de nom_projet)
   src/tokens.rs            Fichier, SuiviTokens, extraire, modele_de, minuit_local
   src/serveur.rs           filtrer, HTTP sur socket Unix, interroger_etat
-  src/presence.rs          trait ClientDiscord, Presence ; client réel sous feature discord
+  src/presence.rs          trait ClientDiscord, Presence, ClientIpc (IPC Discord à la main)
   src/journal.rs           logger fichier avec rotation, DRC_LOG
   src/daemon.rs            Mode, Daemon, EnMarche (assemblage, threads)
   src/installation.rs      hooks, modifier_settings, plist, launchctl
@@ -306,7 +306,7 @@ fn tronquer_coupe_en_caracteres_sans_paniquer() {
   - `pub trait ClientDiscord: Send { fn connecter(&mut self) -> Result<(), ErreurDiscord>; fn publier(&mut self, carte: &Carte) -> Result<(), ErreurDiscord>; fn effacer(&mut self) -> Result<(), ErreurDiscord>; fn fermer(&mut self) -> Result<(), ErreurDiscord>; }`
   - `pub type Fabrique = Box<dyn Fn(&str) -> Box<dyn ClientDiscord> + Send>;`
   - `pub struct Presence`, avec `new(fabrique: Fabrique, intervalle_min_s: f64, reessai_s: f64, horloge: Box<dyn Fn() -> f64 + Send>) -> Self`, `connecte(&self) -> bool`, `soumettre(&mut self, carte: Option<&Carte>, client_id: Option<&str>)`, `effacer_carte(&mut self)` et `fermer(&mut self)`
-  - sous `#[cfg(feature = "discord")]` : `pub fn fabrique_reelle() -> Fabrique`
+  - `pub struct ClientIpc` (impl `ClientDiscord`), `pub fn chemins_ipc() -> Vec<PathBuf>`, `pub fn fabrique_reelle() -> Fabrique` et `pub fn fabrique_sur(chemins: Vec<PathBuf>) -> Fabrique` (tests)
 
 - [ ] **Étape 1 :** porter les tests de `tests/test_presence.py`, sauf les quatre propres à pypresence (`test_client_pypresence_ferme_sans_fermer_la_boucle`, `test_connecter_sans_reponse_expire_et_ferme_le_socket`, `test_connecter_id_invalide_leve_et_ferme_le_socket`, et la partie pypresence de `test_fermeture_echouee_loggee_en_warning`). Ajouter les tests de la pause (spec 14.2, point de vigilance n° 5) :
 
@@ -325,10 +325,34 @@ fn effacer_carte_en_echec_abandonne_la_connexion() { /* effacer lève → connec
 
 - [ ] **Étape 2 :** `cargo test presence` → échec.
 - [ ] **Étape 3 :** implémenter `Presence` en suivant `presence.py` (un seul WARNING par genre d'échec répété, puis DEBUG). `effacer_carte` : si un client est connecté, `effacer()`, puis `derniere = None` et `dernier_envoi = maintenant`. En cas d'échec, même traitement qu'une publication refusée.
-- [ ] **Étape 4 :** client réel, selon le verdict de la tâche 1.
-  - **Crate validée.** `connecter` : `client_id` parsé en `u64` (échec → genre `client_id invalide`), `Client::new`, `on_ready` vers un canal, `start()`, `recv_timeout(5 s)` (échec → `shutdown()`, genre `délai dépassé`). `publier` → `set_activity` (details, state, `timestamps.start`, assets). `effacer` → `clear_activity`. `fermer` → `shutdown`.
-  - **IPC à la main.** Socket `$TMPDIR/discord-ipc-0` à `-9`. Trames : opcode `u32` LE, longueur `u32` LE, JSON. Poignée de main : op 0 `{"v":1,"client_id":…}`, réponse lue en 5 s au plus. Activité : op 1 `{"cmd":"SET_ACTIVITY","args":{"pid":<pid>,"activity":…|null},"nonce":"<compteur>"}`. Fermeture : op 2.
-  - Pas de test unitaire : la sonde et le protocole manuel couvrent ce client.
+- [ ] **Étape 4 :** client réel `ClientIpc`, IPC écrit à la main (verdict du spike, spec 14.1). Le module n'utilise que `std` et `serde_json`.
+  - Retirer `discord-presence`, la feature `discord`, `examples/sonde_discord.rs` et sa section `[[example]]`.
+  - `chemins_ipc()` : premier défini parmi `XDG_RUNTIME_DIR`, `TMPDIR`, `TMP`, `TEMP`, sinon `/tmp` (ordre de pypresence), puis `discord-ipc-0` à `discord-ipc-9`.
+  - Trame : opcode `u32` LE, longueur `u32` LE, puis le JSON. Opcodes : 0 poignée de main, 1 trame, 2 fermeture.
+  - `connecter` : premier chemin qui accepte la connexion. Envoi de op 0 `{"v":1,"client_id":"<id>"}`. Lecture de la réponse en 5 s au plus (`set_read_timeout`). Une op 1 avec `"evt":"READY"` → `Ok`. Op 2, autre événement, délai dépassé ou aucun socket → `Err`, et le socket est fermé.
+  - `publier` : op 1 `{"cmd":"SET_ACTIVITY","args":{"pid":<pid du processus>,"activity":{"details":…,"state":…,"timestamps":{"start":<debut>},"assets":{"large_image":"logo","large_text":"Claude Code"}}},"nonce":"<compteur>"}`. Lecture de la réponse en 5 s ; `"evt":"ERROR"`, op 2 ou délai dépassé → `Err`.
+  - `effacer` : même trame avec `"args":{"pid":<pid>}`, sans `activity`.
+  - `fermer` : op 2 `{"v":1,"client_id":"<id>"}`, puis fermeture du socket ; les erreurs sont ignorées.
+  - Genres d'erreur : `aucun socket Discord`, `délai dépassé`, `connexion fermée`, `réponse invalide`, `refusé par Discord`. Jamais le contenu de la réponse dans un log.
+  - Tests avec un faux Discord : `UnixListener` dans `dossier_court()`, servi par un thread de test.
+
+```rust
+#[test]
+fn connecter_envoie_la_poignee_de_main_et_attend_ready() { /* trame lue côté serveur : op 0, JSON {"v":1,"client_id":"42"} ; répond op 1 READY → Ok */ }
+#[test]
+fn connecter_sans_reponse_expire_en_5_s() { /* serveur qui accepte sans répondre → Err genre "délai dépassé", durée < 6 s */ }
+#[test]
+fn connecter_refuse_par_discord() { /* serveur répond op 2 → Err */ }
+#[test]
+fn publier_envoie_set_activity_avec_la_carte() { /* JSON reçu : cmd SET_ACTIVITY, details, state, timestamps.start, assets.large_image == "logo" */ }
+#[test]
+fn effacer_envoie_set_activity_sans_activity() {}
+#[test]
+fn publier_apres_fermeture_cote_discord_echoue() { /* serveur ferme le socket → Err genre "connexion fermée" : Presence se reconnectera après 15 s */ }
+#[test]
+fn chemins_ipc_suit_l_ordre_des_variables() {}
+```
+
 - [ ] **Étape 5 :** `cargo test presence` → passe. Commit `feat(rust): présence Discord et pause`.
 
 ---
