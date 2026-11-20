@@ -309,6 +309,9 @@ pub fn modifier_settings(
     let diff = TextDiff::from_lines(&avant_texte, &apres_texte)
         .unified_diff()
         .context_radius(3)
+        // Le fichier écrit se termine par un `\n` : la ligne « No newline at end of
+        // file » serait trompeuse juste avant la confirmation.
+        .missing_newline_hint(false)
         .header("avant", "après")
         .to_string();
     if !confirmer(diff.trim_end_matches('\n')) {
@@ -696,6 +699,26 @@ mod tests {
         );
         assert_eq!(lire(&f), settings_tiers());
         assert_eq!(noms(d.path()), ["settings.json".to_string()].into());
+    }
+
+    #[test]
+    fn diff_sans_indication_de_fin_de_ligne() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("settings.json");
+        std::fs::write(&f, "{}").unwrap();
+        let mut vu = String::new();
+        modifier_settings(
+            &f,
+            ajouter_t,
+            |d| {
+                vu = d.to_string();
+                false
+            },
+            horloge,
+        )
+        .unwrap();
+        assert!(!vu.is_empty());
+        assert!(!vu.contains("No newline"), "{vu}");
     }
 
     #[test]

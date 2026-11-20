@@ -1,4 +1,5 @@
 fn main() {
-    eprintln!("discord-rich-claude : en cours de portage");
-    std::process::exit(1);
+    std::process::exit(discord_rich_claude::cli::principal(
+        std::env::args().skip(1).collect(),
+    ));
 }
