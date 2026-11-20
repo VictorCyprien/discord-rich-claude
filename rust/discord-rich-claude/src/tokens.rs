@@ -23,6 +23,16 @@ pub const CHAMPS_COMPTES: [&str; 3] = [
 
 pub type Cle = (String, String);
 
+/// `fold=0` de Python : l'instant le plus tôt, quel que soit l'ordre dans lequel
+/// chrono range les deux candidats d'une heure ambiguë (sur `Local`, il est inversé).
+fn premier_instant<Tz: TimeZone>(r: chrono::LocalResult<chrono::DateTime<Tz>>) -> Option<i64> {
+    match r {
+        chrono::LocalResult::Single(d) => Some(d.timestamp()),
+        chrono::LocalResult::Ambiguous(a, b) => Some(a.timestamp().min(b.timestamp())),
+        chrono::LocalResult::None => None,
+    }
+}
+
 /// Valeur de `minuit_local` pour un fuseau donné, ou le nom de l'exception Python
 /// que `datetime.fromtimestamp` lèverait.
 ///
@@ -46,8 +56,8 @@ pub fn minuit_selon<Tz: TimeZone>(fuseau: &Tz, maintenant: f64) -> Result<f64, &
         return Err("ValueError");
     }
     let minuit = jour.and_hms_opt(0, 0, 0).ok_or("ValueError")?;
-    let instant = match fuseau.from_local_datetime(&minuit).earliest() {
-        Some(d) => d.timestamp(),
+    let instant = match premier_instant(fuseau.from_local_datetime(&minuit)) {
+        Some(t) => t,
         None => {
             // Minuit n'existe pas (saut d'heure) : décalage d'avant la transition.
             let avant = fuseau.offset_from_utc_datetime(&(minuit - Duration::days(1)));
@@ -122,8 +132,8 @@ fn seconds_naives(naif: &NaiveDateTime, microsecondes: i64, decalage_s: Option<i
             total as f64 / 1e6
         }
         None => {
-            let s = match Local.from_local_datetime(naif).earliest() {
-                Some(d) => d.timestamp(),
+            let s = match premier_instant(Local.from_local_datetime(naif)) {
+                Some(t) => t,
                 None => {
                     let avant = Local.offset_from_utc_datetime(&(*naif - Duration::days(1)));
                     naif.and_utc().timestamp() - i64::from(avant.fix().local_minus_utc())
@@ -1046,6 +1056,56 @@ mod tests {
             minuit_selon(&ParisFictif, maintenant),
             Ok(utc(2026, 1, 14, 23))
         );
+    }
+
+    // Chemin `Local` sous un vrai fuseau : le binaire de test se relance dans un
+    // sous-processus avec `TZ` (aucun `set_var` dans le processus de test).
+    fn relancer_sous_tz(tz: &str, enfant: &str) {
+        let sortie = std::process::Command::new(std::env::current_exe().unwrap())
+            .env("TZ", tz)
+            .args(["--exact", enfant, "--ignored", "--nocapture"])
+            .output()
+            .unwrap();
+        assert!(
+            sortie.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&sortie.stdout),
+            String::from_utf8_lossy(&sortie.stderr)
+        );
+        assert!(String::from_utf8_lossy(&sortie.stdout).contains("1 passed"));
+    }
+
+    #[test]
+    fn test_minuit_local_ambigu_sous_tz_havane() {
+        relancer_sous_tz(
+            "America/Havana",
+            "tokens::tests::enfant_minuit_ambigu_havane",
+        );
+    }
+
+    #[test]
+    #[ignore = "lancé en sous-processus avec TZ=America/Havana"]
+    fn enfant_minuit_ambigu_havane() {
+        // 2010-10-31 : repli de 01:00 à 00:00, minuit existe deux fois. Python (fold=0)
+        // prend le premier minuit (UTC-4).
+        assert_eq!(minuit_local(1288501200.0 + 3600.0 * 5.0), 1288497600.0);
+    }
+
+    #[test]
+    fn test_minuit_local_inexistant_sous_tz_sao_paulo() {
+        relancer_sous_tz(
+            "America/Sao_Paulo",
+            "tokens::tests::enfant_minuit_inexistant_sao_paulo",
+        );
+    }
+
+    #[test]
+    #[ignore = "lancé en sous-processus avec TZ=America/Sao_Paulo"]
+    fn enfant_minuit_inexistant_sao_paulo() {
+        // 2018-11-04 : minuit n'existe pas (00:00 -> 01:00). Valeurs relevées avec Python
+        // sous le même TZ.
+        assert_eq!(minuit_local(1541340000.0), 1541300400.0);
+        assert_eq!(minuit_local(1536505200.0), 1536462000.0);
     }
 
     #[test]
