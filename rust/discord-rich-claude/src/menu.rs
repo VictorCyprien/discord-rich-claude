@@ -110,7 +110,8 @@ fn icone_tray(mode: Mode) -> Option<tray_icon::Icon> {
 #[cfg(feature = "menu")]
 fn creer_interface(mode: Mode) -> Result<Interface, &'static str> {
     use tray_icon::TrayIconBuilder;
-    use tray_icon::menu::{Menu, MenuItem};
+    use tray_icon::TrayIconEvent;
+    use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
 
     let ids = [
         None,
@@ -126,9 +127,15 @@ fn creer_interface(mode: Mode) -> Result<Interface, &'static str> {
             Some(id) => MenuItem::with_id(id, entree.libelle, entree.active, None),
             None => MenuItem::new(entree.libelle, entree.active, None),
         };
+        if id == Some(ID_QUITTER) {
+            menu.append(&PredefinedMenuItem::separator())
+                .map_err(|_| "menu")?;
+        }
         menu.append(&ligne).map_err(|_| "menu")?;
         lignes.push(ligne);
     }
+    // Sans gestionnaire, tray-icon empile chaque survol dans un canal sans borne, jamais lu.
+    TrayIconEvent::set_event_handler(Some(|_| {}));
     let tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_icon(icone_tray(mode).ok_or("icône")?)

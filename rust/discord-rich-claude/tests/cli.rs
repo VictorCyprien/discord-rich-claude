@@ -158,6 +158,7 @@ fn test_erreur_demarrage_os_error_retourne_1_logge_et_imprime_sans_trace() {
     let mut erreur = Vec::new();
     let code = lancer_vers(
         &chemins,
+        fabrique_fausse(&Journal::default()),
         |_, _| {
             appele.store(true, Ordering::SeqCst);
             0
@@ -192,6 +193,7 @@ fn deuxieme_run_sort_en_1_avant_toute_ui() {
     let mut erreur = Vec::new();
     let code = lancer_vers(
         &chemins,
+        fabrique_fausse(&Journal::default()),
         |_, _| {
             appele.store(true, Ordering::SeqCst);
             0
@@ -219,6 +221,7 @@ fn run_appelle_le_menu_apres_le_demarrage() {
     let socket = chemins.socket.clone();
     let code = lancer_vers(
         &chemins,
+        fabrique_fausse(&Journal::default()),
         |_, en_marche| {
             assert!(socket.exists(), "le socket est lié avant l'interface");
             en_marche.arreter();

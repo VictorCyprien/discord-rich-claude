@@ -17,7 +17,9 @@ use crate::installation::{
     generer_plist, installer_launch_agent, modifier_settings, retirer_hooks,
 };
 use crate::journal::{configurer_logs, installer_hook_panique};
-use crate::presence::{INTERVALLE_MIN_S, Presence, REESSAI_S, fabrique_reelle, horloge_monotone};
+use crate::presence::{
+    Fabrique, INTERVALLE_MIN_S, Presence, REESSAI_S, fabrique_reelle, horloge_monotone,
+};
 use crate::serveur::{ErreurDemarrage, interroger_etat};
 use crate::sessions::pid_vivant;
 use crate::tokens::SuiviTokens;
@@ -32,22 +34,18 @@ fn ecrire(flux: &mut dyn Write, texte: &str) {
 /// Lance le daemon, puis la fonction de menu (qui ne rend la main que dans les tests).
 /// Rend 1 sans jamais appeler `menu` si le démarrage échoue.
 pub fn lancer(chemins: &Chemins, menu: impl FnOnce(Arc<Daemon>, EnMarche) -> i32) -> i32 {
-    lancer_vers(chemins, menu, &mut io::stderr())
+    lancer_vers(chemins, fabrique_reelle(), menu, &mut io::stderr())
 }
 
 pub fn lancer_vers(
     chemins: &Chemins,
+    fabrique: Fabrique,
     menu: impl FnOnce(Arc<Daemon>, EnMarche) -> i32,
     erreur: &mut dyn Write,
 ) -> i32 {
     let daemon = Daemon::new(
         ConfigSurveillee::new(chemins.config.clone()),
-        Presence::new(
-            fabrique_reelle(),
-            INTERVALLE_MIN_S,
-            REESSAI_S,
-            horloge_monotone(),
-        ),
+        Presence::new(fabrique, INTERVALLE_MIN_S, REESSAI_S, horloge_monotone()),
         SuiviTokens::new(chemins.projets_claude.clone()),
         chemins.projets_claude.clone(),
         Box::new(pid_vivant),
