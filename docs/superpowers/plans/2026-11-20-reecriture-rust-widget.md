@@ -41,7 +41,7 @@ Ce sont les seuls cas de `diff` qu'on peut déclarer comme écarts. Tout autre �
 1. `nom_modele` : le `\d` Python accepte tous les chiffres Unicode (catégorie Nd). Rust n'accepte que l'ASCII. Le `$` Python accepte un `\n` final : Rust le reproduit.
 2. `extraire` : un `message.id`, `uuid` ou `requestId` qui n'est ni texte ni entier (flottant, liste, objet) écarte l'entrée en Rust. Un compteur de tokens hors `i64`, `Infinity` ou `NaN` écarte aussi l'entrée.
 3. `_horodatage` : formats ISO 8601 rares (forme basique `20260918T100000`, semaines) → `None` en Rust. Formats acceptés : RFC 3339, `AAAA-MM-JJTHH:MM:SS[.f]` et `AAAA-MM-JJ HH:MM:SS[.f]` sans fuseau (heure locale), `AAAA-MM-JJ`.
-4. `filtrer` : un corps JSON imbriqué à plus de 128 niveaux est rejeté (limite de `serde_json`).
+4. `filtrer`, entrées qu'aucun hook de Claude Code n'envoie : `NaN`/`Infinity`, et surrogate isolé (`\ud800`) dans un champ lu → événement rejeté en Rust, accepté par Python ; imbrication profonde (au-delà de la limite de récursion Python, ~1000 niveaux) dans un champ ignoré → acceptée en Rust, rejetée par Python. UTF-8 invalide (rejeté) et BOM UTF-8 (accepté) se comportent comme Python.
 5. Config : une boucle de liens dans un chemin autorisé rend la config invalide (comportement de Python 3.12). Couvert par les tests portés, pas par l'oracle.
 
 ## Points de vigilance de la revue
