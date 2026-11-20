@@ -504,8 +504,11 @@ fn traiter(
     drop(tete);
 
     if requete.methode == "GET" && requete.chemin == "/etat" {
-        let etat = catch_unwind(AssertUnwindSafe(|| gestionnaire.etat()))
-            .map_err(|_| ErreurRequete::Inattendue("panique"))?;
+        let etat = {
+            let _garde = crate::journal::panique_rattrapee();
+            catch_unwind(AssertUnwindSafe(|| gestionnaire.etat()))
+        }
+        .map_err(|_| ErreurRequete::Inattendue("panique"))?;
         let json =
             serde_json::to_string(&etat).map_err(|_| ErreurRequete::Inattendue("sérialisation"))?;
         return repondre(flux, 200, json.as_bytes()).map_err(io_rejet);
@@ -550,8 +553,11 @@ fn traiter(
     drop(corps);
     if let Some(ev) = ev {
         let nom = ev.nom.clone();
-        let resultat = catch_unwind(AssertUnwindSafe(|| gestionnaire.sur_evenement(ev)))
-            .unwrap_or(Err("panique"));
+        let resultat = {
+            let _garde = crate::journal::panique_rattrapee();
+            catch_unwind(AssertUnwindSafe(|| gestionnaire.sur_evenement(ev)))
+        }
+        .unwrap_or(Err("panique"));
         if let Err(genre) = resultat {
             log::error!("erreur sur un événement {nom} : {genre}");
             return repondre(flux, 500, b"").map_err(io_rejet);

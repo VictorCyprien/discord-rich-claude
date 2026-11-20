@@ -1,5 +1,6 @@
 //! Journal fichier : `daemon.log` avec rotation, au format du `logging` Python, et hook de panique.
 
+use std::cell::Cell;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -172,10 +173,32 @@ pub fn configurer_logs_avec(dossier: &Path, drc_log: Option<&str>) {
     }
 }
 
+/// Garde RAII : tant qu'elle vit, une panique sur ce thread est rattrapée et signalée
+/// ailleurs (`Signaleur`, log du serveur) ; le hook se tait.
+pub struct GardePanique;
+
+thread_local! {
+    static RATTRAPEES: Cell<u32> = const { Cell::new(0) };
+}
+
+pub fn panique_rattrapee() -> GardePanique {
+    RATTRAPEES.with(|c| c.set(c.get() + 1));
+    GardePanique
+}
+
+impl Drop for GardePanique {
+    fn drop(&mut self) {
+        RATTRAPEES.with(|c| c.set(c.get().saturating_sub(1)));
+    }
+}
+
 /// Remplace le hook de panique par défaut : son message peut citer un `cwd`, et sous
 /// launchd stderr part dans un fichier. Seul un message fixe est écrit.
 pub fn installer_hook_panique() {
     std::panic::set_hook(Box::new(|_| {
+        if RATTRAPEES.with(|c| c.get() > 0) {
+            return;
+        }
         eprintln!("discord-rich-claude : {MESSAGE_PANIQUE}");
         log::error!("{MESSAGE_PANIQUE}");
     }));
@@ -218,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn drc_log_invalide_replie_sur_info_avec_avertissement() {
+    fn niveau_drc_log_invalide_replie_sur_info_avec_avertissement() {
         let (niveau, avertissement) = niveau_depuis(Some("nimporte"));
         assert_eq!(niveau, LevelFilter::Info);
         let message = avertissement.unwrap();
@@ -317,5 +340,45 @@ mod tests {
         assert!(journal.contains(" ERROR "), "journal : {journal}");
         assert!(journal.contains("erreur interne (panique)"));
         assert!(!journal.contains("SECRET"));
+    }
+
+    #[test]
+    #[ignore = "lancé en sous-processus par test_drc_log_invalide_replie_sur_info_avec_avertissement"]
+    fn enfant_drc_log() {
+        let Ok(dossier) = std::env::var("DRC_TEST_DOSSIER") else {
+            return;
+        };
+        configurer_logs(Path::new(&dossier));
+        assert_eq!(log::max_level(), LevelFilter::Info);
+        log::debug!("MARQUEUR-DEBUG");
+        log::info!("MARQUEUR-INFO");
+    }
+
+    /// De bout en bout : `DRC_LOG` invalide ne fait jamais planter le démarrage (G3).
+    #[test]
+    fn test_drc_log_invalide_replie_sur_info_avec_avertissement() {
+        let dossier = tempfile::tempdir().unwrap();
+        let sortie = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "journal::tests::enfant_drc_log",
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("DRC_TEST_DOSSIER", dossier.path())
+            .env("DRC_LOG", "nimporte")
+            .output()
+            .unwrap();
+        assert!(sortie.status.success(), "l'enfant a échoué");
+        let journal = lire(&dossier.path().join("daemon.log"));
+        let avertissements: Vec<&str> = journal
+            .lines()
+            .filter(|l| l.contains(" WARNING "))
+            .collect();
+        assert_eq!(avertissements.len(), 1, "journal : {journal}");
+        assert!(avertissements[0].contains("NIMPORTE"));
+        assert!(journal.contains("MARQUEUR-INFO"));
+        assert!(!journal.contains("MARQUEUR-DEBUG"));
     }
 }

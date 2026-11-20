@@ -19,6 +19,7 @@ use serde_json::{Value, json};
 
 use crate::carte::{Carte, Stats, construire_carte, est_vue_b};
 use crate::config::ConfigSurveillee;
+use crate::journal::panique_rattrapee;
 use crate::presence::Presence;
 use crate::serveur::{ErreurDemarrage, Gestionnaire, Serveur, demarrer_serveur};
 use crate::sessions::{Evenement, Registre};
@@ -116,6 +117,12 @@ impl Daemon {
 
     pub fn mode(&self) -> Mode {
         verrou(&self.etat).mode
+    }
+
+    /// `Debug` des sessions, pour les tests de confidentialité.
+    #[doc(hidden)]
+    pub fn debug_sessions(&self) -> String {
+        format!("{:?}", verrou(&self.etat).registre.sessions)
     }
 
     pub fn recevoir(&self, ev: Evenement) {
@@ -342,13 +349,17 @@ fn demander_arret(arret: &Arret) {
     cv.notify_all();
 }
 
-fn boucle(arret: &Arret, periode_s: f64, nom: &str, action: impl Fn()) {
+fn boucle(arret: &Arret, periode_s: f64, nom: &str, action: impl Fn() -> Result<(), &'static str>) {
     let mut signaleur = Signaleur::default();
     loop {
         if *verrou(&arret.0) {
             return;
         }
-        let resultat = catch_unwind(AssertUnwindSafe(&action)).map_err(|_| "panique");
+        let resultat = {
+            // la panique rattrapée est signalée une fois par `Signaleur` : le hook se tait
+            let _garde = panique_rattrapee();
+            catch_unwind(AssertUnwindSafe(&action)).unwrap_or(Err("panique"))
+        };
         if let Some((niveau, texte)) = signaleur.suivre(nom, resultat) {
             log::log!(niveau, "{texte}");
         }
@@ -375,9 +386,12 @@ fn lancer(
 ) -> io::Result<JoinHandle<()>> {
     let daemon = Arc::clone(daemon);
     let arret = Arc::clone(arret);
-    thread::Builder::new()
-        .name(nom.into())
-        .spawn(move || boucle(&arret, periode_s, nom, || action(&daemon)))
+    thread::Builder::new().name(nom.into()).spawn(move || {
+        boucle(&arret, periode_s, nom, || {
+            action(&daemon);
+            Ok(())
+        })
+    })
 }
 
 /// Lie le socket (avant les threads : le `umask` posé pendant le `bind` vaut pour tout le
@@ -450,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn boucle_ne_repete_pas_la_meme_erreur_et_signale_le_retablissement() {
+    fn signaleur_ne_repete_pas_la_meme_erreur_et_signale_le_retablissement() {
         let mut s = Signaleur::default();
         let mut lignes = Vec::new();
         let sequence = [
@@ -495,5 +509,82 @@ mod tests {
         demander_arret(&arret);
         fil.join().unwrap();
         assert!(debut.elapsed() < Duration::from_millis(100));
+    }
+
+    const MARQUEUR: &str = "SECRET-/chemin/tres/secret/fourni/par/un/hook";
+
+    /// Enfant des tests du hook et de la boucle : hook installé, logger fichier, une action
+    /// qui panique cinq fois puis réussit.
+    #[test]
+    #[ignore = "lancé en sous-processus par les tests du hook et de la boucle"]
+    fn enfant_boucle() {
+        let Ok(dossier) = std::env::var("DRC_TEST_DOSSIER") else {
+            return;
+        };
+        crate::journal::configurer_logs_avec(Path::new(&dossier), Some("DEBUG"));
+        crate::journal::installer_hook_panique();
+        let arret: Arret = Arc::new((Mutex::new(false), Condvar::new()));
+        let compte = std::sync::atomic::AtomicUsize::new(0);
+        let a = Arc::clone(&arret);
+        boucle(&arret, 0.001, "test", || {
+            let n = compte.fetch_add(1, Ordering::SeqCst) + 1;
+            if n <= 5 {
+                panic!("{MARQUEUR}");
+            }
+            demander_arret(&a);
+            Ok(())
+        });
+    }
+
+    /// Lance `enfant_boucle` ; rend (stderr, contenu de daemon.log).
+    fn lancer_enfant_boucle() -> (String, String) {
+        let dossier = tempfile::tempdir().unwrap();
+        let sortie = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "daemon::tests::enfant_boucle",
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("DRC_TEST_DOSSIER", dossier.path())
+            .output()
+            .unwrap();
+        assert!(sortie.status.success(), "l'enfant a échoué");
+        let journal = std::fs::read_to_string(dossier.path().join("daemon.log")).unwrap();
+        (
+            String::from_utf8_lossy(&sortie.stderr).into_owned(),
+            journal,
+        )
+    }
+
+    #[test]
+    fn hook_muet_sous_catch_unwind() {
+        let (stderr, journal) = lancer_enfant_boucle();
+        let erreurs_hook = journal
+            .lines()
+            .filter(|l| l.contains("erreur interne (panique)"))
+            .count();
+        assert_eq!(erreurs_hook, 0, "journal : {journal}");
+        let erreurs = journal.lines().filter(|l| l.contains(" ERROR ")).count();
+        assert_eq!(erreurs, 1, "journal : {journal}");
+        assert!(!stderr.contains("SECRET") && !stderr.contains("/chemin/"));
+        assert!(!stderr.contains("erreur interne"), "stderr : {stderr}");
+    }
+
+    /// Port de `test_boucle_ne_repete_pas_la_meme_erreur_et_signale_le_retablissement`.
+    /// Écart accepté : la trace complète en DEBUG n'existe pas en Rust.
+    #[test]
+    fn test_boucle_ne_repete_pas_la_meme_erreur_et_signale_le_retablissement() {
+        let (_, journal) = lancer_enfant_boucle();
+        let erreurs: Vec<&str> = journal.lines().filter(|l| l.contains(" ERROR ")).collect();
+        let infos: Vec<&str> = journal.lines().filter(|l| l.contains(" INFO ")).collect();
+        assert_eq!(erreurs.len(), 1, "journal : {journal}");
+        assert!(erreurs[0].ends_with("test en erreur : panique"));
+        assert_eq!(infos.len(), 1);
+        assert!(infos[0].ends_with("test rétabli"));
+        for l in erreurs.iter().chain(infos.iter()) {
+            assert!(!l.contains("SECRET") && !l.contains("/chemin/"));
+        }
     }
 }

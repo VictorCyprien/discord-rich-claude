@@ -176,6 +176,7 @@ fn test_bout_en_bout() {
             .unwrap()
             .contains(&(std::process::id() as i32))
     );
+    assert!(!b.daemon.debug_sessions().contains("SECRET"));
     assert_eq!(nb_sessions(&b), 1);
 
     attendre(|| {
