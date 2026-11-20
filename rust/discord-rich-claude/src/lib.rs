@@ -3,5 +3,6 @@
 pub mod carte;
 pub mod chemins;
 pub mod config;
+pub mod serveur;
 pub mod sessions;
 pub mod tokens;

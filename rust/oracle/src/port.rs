@@ -47,8 +47,49 @@ pub fn filtrer(
     recu_a: f64,
     projets_claude: serde_json::Value,
 ) -> Result<Option<serde_json::Value>, String> {
-    let _ = (&corps, &pid_brut, &recu_a, &projets_claude);
-    Err("non porté".into())
+    use serde_json::{Value, json};
+    // `json.loads` accepte du texte ou des octets, rien d'autre.
+    let octets: Vec<u8> = match &corps {
+        Value::String(texte) => texte.as_bytes().to_vec(),
+        Value::Object(o) if o.len() == 1 && o.contains_key("$bytes") => o["$bytes"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_u64)
+                    .map(|b| b as u8)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        autre => {
+            let nom = match autre {
+                Value::Null => "NoneType",
+                Value::Bool(_) => "bool",
+                Value::Number(n) if n.is_f64() => "float",
+                Value::Number(_) => "int",
+                Value::Array(_) => "list",
+                _ => "dict",
+            };
+            return Err(format!(
+                "TypeError: the JSON object must be str, bytes or bytearray, not {nom}"
+            ));
+        }
+    };
+    // la racine ne sert qu'aux transcripts ; un type inattendu n'en autorise aucun
+    let racine = std::path::PathBuf::from(projets_claude.as_str().unwrap_or("\0invalide"));
+    let evenement =
+        discord_rich_claude::serveur::filtrer(&octets, pid_brut.as_deref(), recu_a, &racine);
+    Ok(evenement.map(|ev| {
+        json!({"$object": "Evenement", "attrs": {
+            "nom": ev.nom,
+            "session_id": ev.session_id,
+            "recu_a": {"$float": format!("{:?}", ev.recu_a)},
+            "cwd": ev.cwd,
+            "tool_name": ev.tool_name,
+            "agent_id": ev.agent_id,
+            "transcript_path": ev.transcript_path,
+            "pid": ev.pid,
+        }})
+    }))
 }
 
 /// Port of `libelle_outil` (`src/discord_rich_claude/sessions.py:53`).
