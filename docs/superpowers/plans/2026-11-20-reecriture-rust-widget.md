@@ -42,7 +42,7 @@ Ce sont les seuls cas de `diff` qu'on peut déclarer comme écarts. Tout autre �
 2. `extraire` : un `message.id`, `uuid` ou `requestId` qui n'est ni texte ni entier (flottant, liste, objet) écarte l'entrée en Rust. Un compteur de tokens hors `i64`, `Infinity` ou `NaN` écarte aussi l'entrée.
 3. `_horodatage` : formats ISO 8601 rares (forme basique `20260918T100000`, semaines) → `None` en Rust. Formats acceptés : RFC 3339, `AAAA-MM-JJTHH:MM:SS[.f]` et `AAAA-MM-JJ HH:MM:SS[.f]` sans fuseau (heure locale), `AAAA-MM-JJ`.
 4. `filtrer` : un corps JSON imbriqué à plus de 128 niveaux est rejeté (limite de `serde_json`).
-5. `charger` (config) : une boucle de liens dans un chemin autorisé rend la config invalide (comportement de Python 3.12).
+5. Config : une boucle de liens dans un chemin autorisé rend la config invalide (comportement de Python 3.12). Couvert par les tests portés, pas par l'oracle.
 
 ## Points de vigilance de la revue
 
@@ -148,7 +148,7 @@ H=$(mktemp -d); UV_CACHE_DIR="$HOME/.cache/uv" UV_OFFLINE=1 HOME="$H" \
 
 **Fichiers :**
 - Créer : `src/chemins.rs`, `src/sessions.rs`
-- Modifier : `rust/oracle/src/port.rs` (`libelle_outil`, `fichiers_de_session` attendra la tâche 6)
+- Modifier : `rust/oracle/src/port.rs` (`libelle_outil`)
 
 **Interfaces :**
 - Produit (`chemins`) :
@@ -178,7 +178,6 @@ H=$(mktemp -d); UV_CACHE_DIR="$HOME/.cache/uv" UV_OFFLINE=1 HOME="$H" \
 
 **Fichiers :**
 - Créer : `src/config.rs`
-- Modifier : `rust/oracle/src/port.rs` (`charger`)
 
 **Interfaces :**
 - Consomme : `chemins::resoudre`.
@@ -192,7 +191,7 @@ H=$(mktemp -d); UV_CACHE_DIR="$HOME/.cache/uv" UV_OFFLINE=1 HOME="$H" \
 - [ ] **Étape 1 :** porter les 34 tests de `tests/test_config.py`.
 - [ ] **Étape 2 :** `cargo test config` → échec.
 - [ ] **Étape 3 :** implémenter en suivant `config.py`. Règles de validation : `client_id` texte ou entier (booléen refusé, entier → texte décimal, `""` → `None`) ; `[projets]` table ; `autorises` liste de textes ; `~` développé avec `HOME` ; chemin relatif refusé ; chemins résolus avec `resoudre(_, false)`. Bornes : `inactif_apres_min` et `masquer_apres_min` dans [1, 1440], `rotation_s` dans [5, 3600], entier ou flottant, booléen refusé, borne testée avant la finitude. Les messages de log reprennent ceux de `config.py`.
-- [ ] **Étape 4 :** `cargo test config` → passe. Adaptateur `charger` (sortie sérialisée comme le `Config` Python : chemins en texte), puis diff → `charger` N/N, ou écart n° 5.
+- [ ] **Étape 4 :** `cargo test config` → passe. `charger` dépend du disque : hors oracle (décision du 2026-11-20), couvert par les 34 tests portés.
 - [ ] **Étape 5 :** commit `feat(rust): config`.
 
 ---
@@ -201,7 +200,7 @@ H=$(mktemp -d); UV_CACHE_DIR="$HOME/.cache/uv" UV_OFFLINE=1 HOME="$H" \
 
 **Fichiers :**
 - Créer : `src/carte.rs`
-- Modifier : `rust/oracle/src/port.rs` (`formater_nombre`, `nom_modele`, `nom_projet`, `est_vue_b`)
+- Modifier : `rust/oracle/src/port.rs` (`formater_nombre`, `nom_modele`, `est_vue_b`)
 
 **Interfaces :**
 - Consomme : `Registre`, `Session`, `activite_affichee` (tâche 3) ; `Config` (tâche 4) ; `chemins::resoudre`.
@@ -231,7 +230,7 @@ fn tronquer_coupe_en_caracteres_sans_paniquer() {
 
 - [ ] **Étape 2 :** `cargo test carte` → échec.
 - [ ] **Étape 3 :** implémenter en suivant `carte.py`. Le masquage se calcule sur les sessions qui comptent, jamais avec `session_affichee()`. Égalités : premier maximum.
-- [ ] **Étape 4 :** `cargo test carte` → passe. Adaptateurs, puis diff → les quatre fonctions N/N, sauf l'écart n° 1. L'arrondi `{:.1}` de `formater_nombre` doit égaler celui de Python : le diff tranche.
+- [ ] **Étape 4 :** `cargo test carte` → passe. Adaptateurs, puis diff → les trois fonctions N/N, sauf l'écart n° 1. `nom_projet` dépend du disque : hors oracle, couvert par les tests portés. L'arrondi `{:.1}` de `formater_nombre` doit égaler celui de Python : le diff tranche.
 - [ ] **Étape 5 :** commit `feat(rust): carte`.
 
 ---
@@ -240,7 +239,7 @@ fn tronquer_coupe_en_caracteres_sans_paniquer() {
 
 **Fichiers :**
 - Créer : `src/tokens.rs`
-- Modifier : `rust/oracle/src/port.rs` (`minuit_local`, `fichiers_de_session`, `extraire`, `modele_de`)
+- Modifier : `rust/oracle/src/port.rs` (`minuit_local`, `extraire`, `modele_de`)
 
 **Interfaces :**
 - Produit :
@@ -255,7 +254,7 @@ fn tronquer_coupe_en_caracteres_sans_paniquer() {
 - [ ] **Étape 1 :** porter les 18 tests de `tests/test_tokens.py`.
 - [ ] **Étape 2 :** `cargo test tokens` → échec.
 - [ ] **Étape 3 :** implémenter en suivant `tokens.py`. Lecture par lignes terminées par `\n`, avec un décalage en octets ; une ligne incomplète attend. Filtre rapide `"usage"`/`"model"` avant le parsing JSON. Fichier raccourci : on repart de zéro. Parcours récursif de `racine` écrit à la main, qui **ne suit pas** les dossiers liés et garde les fichiers dont le nom finit par `.jsonl`. Jamais tout le fichier en mémoire.
-- [ ] **Étape 4 :** `cargo test tokens` → passe. Adaptateurs, puis diff → N/N, hors écarts n° 2 et 3.
+- [ ] **Étape 4 :** `cargo test tokens` → passe. Adaptateurs, puis diff → N/N, hors écarts n° 2 et 3. `fichiers_de_session` dépend du disque : hors oracle, couvert par les tests portés.
 - [ ] **Étape 5 :** commit `feat(rust): tokens`.
 
 ---
@@ -264,7 +263,7 @@ fn tronquer_coupe_en_caracteres_sans_paniquer() {
 
 **Fichiers :**
 - Créer : `src/serveur.rs`, `tests/commun/mod.rs` (`dossier_court`)
-- Modifier : `rust/oracle/src/port.rs` (`filtrer`, `transcript_autorise`)
+- Modifier : `rust/oracle/src/port.rs` (`filtrer`)
 
 **Interfaces :**
 - Consomme : `Evenement` (tâche 3), `chemins::resoudre`.
@@ -289,7 +288,7 @@ fn tronquer_coupe_en_caracteres_sans_paniquer() {
   - dossier d'état : `lstat`, refusé si c'est un lien, si ce n'est pas un dossier ou si un autre uid le possède ; puis `chmod 0700` ;
   - ancien socket : un lien ou un fichier est supprimé ; un socket qui répond → `DejaLance` ; un socket qui ne répond pas est supprimé ;
   - `bind` sous `umask(0o177)`, puis `chmod 0600`.
-- [ ] **Étape 4 :** `cargo test serveur` → passe. Adaptateurs, puis diff → `filtrer` et `transcript_autorise` N/N, hors écart n° 4.
+- [ ] **Étape 4 :** `cargo test serveur` → passe. Adaptateur, puis diff → `filtrer` N/N, hors écart n° 4. `transcript_autorise` dépend du disque : hors oracle, couvert par les tests portés.
 - [ ] **Étape 5 :** commit `feat(rust): serveur sur socket Unix`.
 
 ---
