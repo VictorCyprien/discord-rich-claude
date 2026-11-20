@@ -23,6 +23,30 @@ pub fn est_vue_b(maintenant: f64, rotation_s: f64) -> Result<bool, String> {
         .map_err(|nom| format!("{nom}: division impossible"))
 }
 
+/// Classe d'exception que Python lève sur un `settings` qui n'est pas un objet
+/// (`"hooks" in settings`, puis `settings["hooks"]` ou `settings.get`).
+/// `None` : le cas se traite normalement (objet).
+fn erreur_forme(settings: &serde_json::Value, avec_get: bool) -> Option<Result<(), String>> {
+    use serde_json::Value;
+    let contient_hooks = match settings {
+        Value::Object(_) => return None,
+        Value::String(t) => t.contains("hooks"),
+        Value::Array(v) => v.iter().any(|e| e.as_str() == Some("hooks")),
+        _ => {
+            return Some(Err(
+                "TypeError: argument of type is not a container or iterable".into(),
+            ));
+        }
+    };
+    if contient_hooks {
+        Some(Err("TypeError: indices must be integers".into()))
+    } else if avec_get {
+        Some(Err("AttributeError: object has no attribute 'get'".into()))
+    } else {
+        Some(Ok(()))
+    }
+}
+
 /// Port of `ajouter_hooks` (`src/discord_rich_claude/installation.py:53`).
 ///
 /// `commande` defaults to `COMMANDE_HOOK` in the source.
@@ -30,14 +54,22 @@ pub fn ajouter_hooks(
     settings: serde_json::Value,
     commande: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let _ = (&settings, &commande);
-    Err("non porté".into())
+    if let Some(erreur) = erreur_forme(&settings, true) {
+        return erreur.map(|()| settings);
+    }
+    let commande =
+        commande.unwrap_or_else(|| discord_rich_claude::chemins::COMMANDE_HOOK.to_string());
+    discord_rich_claude::installation::ajouter_hooks(&settings, &commande)
+        .map_err(|m| format!("ValueError: {m}"))
 }
 
 /// Port of `retirer_hooks` (`src/discord_rich_claude/installation.py:71`).
 pub fn retirer_hooks(settings: serde_json::Value) -> Result<serde_json::Value, String> {
-    let _ = &settings;
-    Err("non porté".into())
+    if let Some(erreur) = erreur_forme(&settings, false) {
+        return erreur.map(|()| settings);
+    }
+    discord_rich_claude::installation::retirer_hooks(&settings)
+        .map_err(|m| format!("ValueError: {m}"))
 }
 
 /// Port of `filtrer` (`src/discord_rich_claude/serveur.py:87`).
