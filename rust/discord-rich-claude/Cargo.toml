@@ -13,14 +13,9 @@ path = "src/lib.rs"
 name = "discord-rich-claude"
 path = "src/main.rs"
 
-[[example]]
-name = "sonde_discord"
-required-features = ["discord"]
-
 [features]
-default = ["menu", "discord"]
+default = ["menu"]
 menu = ["dep:tray-icon", "dep:tao", "dep:ctrlc"]
-discord = ["dep:discord-presence"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -31,7 +26,6 @@ chrono = "0.4"
 similar = "2"
 libc = "0.2"
 log = "0.4"
-discord-presence = { version = "3.2", optional = true }
 tray-icon = { version = "0.19", optional = true }
 tao = { version = "0.31", optional = true }
 ctrlc = { version = "3", features = ["termination"], optional = true }
@@ -43,7 +37,6 @@ tempfile = "3"
 opt-level = "z"
 lto = true
 codegen-units = 1
-panic = "abort"
 strip = true
 
 # Les dépendances de la liste fermée sont déclarées dès le squelette ; les
