@@ -86,7 +86,7 @@ Les tests unitaires d'un module vivent dans son `#[cfg(test)] mod tests`. Chaque
 
 ---
 
-### Tâche 1 : squelette de la crate et sonde Discord
+### Task 1: squelette de la crate et sonde Discord
 
 **Fichiers :**
 - Créer : `rust/discord-rich-claude/Cargo.toml`, `src/lib.rs`, `src/main.rs`, `examples/sonde_discord.rs`
@@ -104,7 +104,7 @@ Les tests unitaires d'un module vivent dans son `#[cfg(test)] mod tests`. Chaque
 
 ---
 
-### Tâche 2 : oracle rust-anything
+### Task 2: oracle rust-anything
 
 **Fichiers :**
 - Créer : `rust/oracle/` (généré), `rust/oracle/cas-spec.jsonl`
@@ -144,7 +144,7 @@ H=$(mktemp -d); UV_CACHE_DIR="$HOME/.cache/uv" UV_OFFLINE=1 HOME="$H" \
 
 ---
 
-### Tâche 3 : `chemins` et `sessions`
+### Task 3: `chemins` et `sessions`
 
 **Fichiers :**
 - Créer : `src/chemins.rs`, `src/sessions.rs`
@@ -174,7 +174,7 @@ H=$(mktemp -d); UV_CACHE_DIR="$HOME/.cache/uv" UV_OFFLINE=1 HOME="$H" \
 
 ---
 
-### Tâche 4 : `config`
+### Task 4: `config`
 
 **Fichiers :**
 - Créer : `src/config.rs`
@@ -197,7 +197,7 @@ H=$(mktemp -d); UV_CACHE_DIR="$HOME/.cache/uv" UV_OFFLINE=1 HOME="$H" \
 
 ---
 
-### Tâche 5 : `carte`
+### Task 5: `carte`
 
 **Fichiers :**
 - Créer : `src/carte.rs`
@@ -236,7 +236,7 @@ fn tronquer_coupe_en_caracteres_sans_paniquer() {
 
 ---
 
-### Tâche 6 : `tokens`
+### Task 6: `tokens`
 
 **Fichiers :**
 - Créer : `src/tokens.rs`
@@ -260,7 +260,7 @@ fn tronquer_coupe_en_caracteres_sans_paniquer() {
 
 ---
 
-### Tâche 7 : `serveur`
+### Task 7: `serveur`
 
 **Fichiers :**
 - Créer : `src/serveur.rs`, `tests/commun/mod.rs` (`dossier_court`)
@@ -294,7 +294,7 @@ fn tronquer_coupe_en_caracteres_sans_paniquer() {
 
 ---
 
-### Tâche 8 : `presence`
+### Task 8: `presence`
 
 **Fichiers :**
 - Créer : `src/presence.rs`
@@ -333,7 +333,7 @@ fn effacer_carte_en_echec_abandonne_la_connexion() { /* effacer lève → connec
 
 ---
 
-### Tâche 9 : `journal` et `daemon`
+### Task 9: `journal` et `daemon`
 
 **Fichiers :**
 - Créer : `src/journal.rs`, `src/daemon.rs`, `tests/integration.rs` ; compléter `tests/commun/mod.rs` (`FauxClient` à journal partagé, `envoyer_hook(home, payload)` qui lance `sh -c COMMANDE_HOOK` avec `HOME` et `PATH` seulement, `attendre(condition, 5 s)`)
@@ -377,7 +377,7 @@ fn allumer_apres_arreter_reconstruit_depuis_les_hooks() { /* un hook après Allu
 
 ---
 
-### Tâche 10 : `installation` et `bundle`
+### Task 10: `installation` et `bundle`
 
 **Fichiers :**
 - Créer : `src/installation.rs`, `src/bundle.rs`
@@ -434,7 +434,7 @@ fn desinstaller_bundle_absent_ne_leve_pas() {}
 
 ---
 
-### Tâche 11 : `menu` et `cli`
+### Task 11: `menu` et `cli`
 
 **Fichiers :**
 - Créer : `src/menu.rs`, `src/cli.rs`
@@ -485,7 +485,7 @@ fn install_plist_pointe_dans_le_bundle() { /* point de vigilance n° 4 : Program
 
 ---
 
-### Tâche 12 : gate et validation manuelle
+### Task 12: gate et validation manuelle
 
 **Fichiers :**
 - Modifier : `rust/oracle/known-diffs.jsonl` (écarts 1 à 5 seulement, s'ils sont observés)
@@ -504,7 +504,7 @@ fn install_plist_pointe_dans_le_bundle() { /* point de vigilance n° 4 : Program
 
 ---
 
-### Tâche 13 : retrait du Python et documentation
+### Task 13: retrait du Python et documentation
 
 **Fichiers :**
 - Supprimer : `src/`, `tests/`, `sonde/`, `pyproject.toml`, `uv.lock`, `rust/oracle/`
