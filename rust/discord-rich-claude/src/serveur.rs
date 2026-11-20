@@ -275,6 +275,10 @@ pub fn filtrer(
     recu_a: f64,
     projets_claude: &Path,
 ) -> Option<Evenement> {
+    // `json.loads` sur des octets : UTF-8 valide partout (même dans une valeur ignorée) et un
+    // BOM UTF-8 en tête est toléré (une seule fois).
+    let corps = corps.strip_prefix(b"\xef\xbb\xbf").unwrap_or(corps);
+    std::str::from_utf8(corps).ok()?;
     let ChampsLus(mut champs) = serde_json::from_slice(corps).ok()?;
     // un champ présent mais non textuel (et non null) fait rejeter l'événement entier
     if champs.iter().any(|c| matches!(c, Champ::Autre)) {
@@ -557,11 +561,10 @@ fn traiter(
 }
 
 fn servir(mut flux: UnixStream, gestionnaire: &dyn Gestionnaire, projets_claude: &Path) {
-    // bornes de départ ; `lire_avant` les resserre à chaque lecture
-    if flux.set_read_timeout(Some(DELAI)).is_err() || flux.set_write_timeout(Some(DELAI)).is_err() {
-        log::debug!("requête rejetée : connexion coupée");
-        return;
-    }
+    // bornes de départ ; `lire_avant` les resserre à chaque lecture. macOS rend EINVAL quand le
+    // pair a déjà fermé (client qui envoie puis ferme) : la requête reste lisible, on continue.
+    let _ = flux.set_read_timeout(Some(DELAI));
+    let _ = flux.set_write_timeout(Some(DELAI));
     match traiter(&mut flux, gestionnaire, projets_claude) {
         Ok(()) => {}
         Err(ErreurRequete::Rejetee(genre)) => log::debug!("requête rejetée : {genre}"),
@@ -889,14 +892,40 @@ mod tests {
         };
         // un champ inconnu est sauté sans récursion : 200 niveaux passent, comme en Python
         assert!(filtrer(&imbrique(200), None, 0.0, t.path()).is_some());
-        // une profondeur démesurée ne fait jamais déborder la pile
-        let _ = filtrer(&imbrique(1_000_000), None, 0.0, t.path());
+        // écart n° 4 : sans limite de profondeur dans un champ ignoré, donc accepté (Python
+        // lève RecursionError au-delà d'environ 1000 niveaux), et sans débordement de pile
+        assert!(filtrer(&imbrique(1_000_000), None, 0.0, t.path()).is_some());
         // un champ de la liste fermée imbriqué est de toute façon non textuel : rejeté
         let mut brut = br#"{"hook_event_name":"Stop","session_id":"s1","tool_name":"#.to_vec();
         brut.extend(vec![b'['; 200]);
         brut.extend(vec![b']'; 200]);
         brut.push(b'}');
         assert!(filtrer(&brut, None, 0.0, t.path()).is_none());
+    }
+
+    #[test]
+    fn filtrer_refuse_un_utf8_invalide_meme_dans_une_valeur_ignoree() {
+        let t = tmp();
+        let mut brut = br#"{"hook_event_name":"Stop","session_id":"s1","prompt":"a"#.to_vec();
+        brut.push(0xff);
+        brut.extend_from_slice(b"\"}");
+        assert!(filtrer(&brut, None, 0.0, t.path()).is_none());
+    }
+
+    #[test]
+    fn filtrer_accepte_un_bom_utf8_en_tete() {
+        let t = tmp();
+        let mut brut = vec![0xef, 0xbb, 0xbf];
+        brut.extend(corps(
+            json!({"hook_event_name": "Stop", "session_id": "s1"}),
+        ));
+        assert!(filtrer(&brut, None, 0.0, t.path()).is_some());
+        // un seul BOM, et seulement en tête
+        let mut deux = vec![0xef, 0xbb, 0xbf, 0xef, 0xbb, 0xbf];
+        deux.extend(corps(
+            json!({"hook_event_name": "Stop", "session_id": "s1"}),
+        ));
+        assert!(filtrer(&deux, None, 0.0, t.path()).is_none());
     }
 
     fn avec_pid(pid_brut: Option<&str>) -> Option<i32> {
@@ -989,7 +1018,7 @@ mod tests {
     // --- transcript_autorise ---
 
     #[test]
-    fn transcript_autorise_cas_de_base() {
+    fn test_transcript_autorise() {
         let t = tmp();
         let racine = t.path().join("projects");
         fs::create_dir_all(racine.join("p")).unwrap();

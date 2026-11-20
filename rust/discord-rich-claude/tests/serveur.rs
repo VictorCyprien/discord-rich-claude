@@ -68,6 +68,7 @@ struct Faux {
     recus: Mutex<Vec<Evenement>>,
     appels: AtomicUsize,
     echec_premier: bool,
+    echec_toujours: bool,
     panique_evenement: bool,
     panique_etat: bool,
 }
@@ -79,7 +80,7 @@ impl Gestionnaire for Faux {
             panic!("SECRET-PANIQUE-EVENEMENT /Users/victor/secret/fichier.py");
         }
         self.recus.lock().unwrap().push(ev);
-        if self.echec_premier && n == 0 {
+        if (self.echec_premier && n == 0) || self.echec_toujours {
             return Err("boum");
         }
         Ok(())
@@ -437,7 +438,8 @@ fn erreur_inattendue_repond_500() {
 }
 
 #[test]
-fn gestionnaire_qui_panique_repond_500_sans_fuite() {
+// Ne regarde que la façade `log` ; le hook de panique global (stderr) est installé et testé par le binaire (tâche 9).
+fn gestionnaire_qui_panique_repond_500_sans_fuite_dans_le_journal() {
     let _serie = serie();
     let b = banc_avec(Faux {
         panique_evenement: true,
@@ -471,10 +473,10 @@ fn assert_pas_de_fuite() {
 }
 
 #[test]
-fn erreur_du_gestionnaire_ne_fuite_pas_dans_les_logs() {
+fn test_gestionnaire_erreur_ne_fuite_pas_dans_les_logs() {
     let _serie = serie();
     let b = banc_avec(Faux {
-        echec_premier: true,
+        echec_toujours: true,
         ..Faux::default()
     });
     let secret = corps(json!({
@@ -486,6 +488,7 @@ fn erreur_du_gestionnaire_ne_fuite_pas_dans_les_logs() {
         b.requete(&post(&secret, "X-Secret: SECRET-ENTETE\r\n"))
             .starts_with(b"HTTP/1.1 500")
     );
+    assert!(b.requete(&post(&secret, "")).starts_with(b"HTTP/1.1 500"));
     assert_pas_de_fuite();
 }
 
@@ -656,4 +659,23 @@ fn vrai_curl_comme_le_hook() {
     let recus = b.recus();
     assert_eq!(recus.len(), 1);
     assert_eq!(recus[0].pid, Some(4321));
+}
+
+#[test]
+fn envoyer_puis_fermer_l_evenement_est_recu() {
+    let _serie = serie();
+    let b = banc();
+    // le client envoie la requête complète puis ferme sans lire la réponse (macOS : EINVAL
+    // sur les réglages de délai d'un socket dont le pair a fermé)
+    for _ in 0..50 {
+        let mut flux = UnixStream::connect(&b.socket).unwrap();
+        flux.write_all(&post(&evenement_stop(), "X-Claude-Pid: 77\r\n"))
+            .unwrap();
+        drop(flux);
+    }
+    let debut = Instant::now();
+    while b.recus().len() < 50 && debut.elapsed() < Duration::from_secs(5) {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(b.recus().len(), 50);
 }
