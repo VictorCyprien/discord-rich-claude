@@ -6,8 +6,10 @@ Tout reste local : les hooks de Claude Code parlent au daemon par un socket Unix
 
 ## Installation
 
+Prérequis : macOS, la toolchain Rust (`cargo`, installé via [rustup](https://rustup.rs)) et Discord ouvert.
+
 1. Crée l'application Discord : https://discord.com/developers/applications > New Application. Le Developer Portal refuse un nom avec une espace (erreur 50277, testé avec « Claude Code ») : utilise par exemple `ClaudeCode` ou `Claude·Code`. Le titre de la carte est le nom de l'application. Dans Rich Presence > Art Assets, dépose une image carrée sous la clé d'asset `logo`. Copie l'Application ID (General Information).
-2. Compile, puis installe, depuis un terminal classique :
+2. Compile, puis installe :
 
    ```bash
    cargo build --release

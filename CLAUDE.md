@@ -27,6 +27,7 @@ Le projet reste en français (code, tests, libellés, commits) : ne rien traduir
 - `bundle` : app `~/Applications/Discord Rich Claude.app`, signature ad hoc, lien de commande.
 - `menu` : barre de menus (tray-icon, tao).
 - `cli` : ligne de commande.
+- `aides_tests.rs` : aides des tests unitaires de la lib (`cfg(test)`).
 
 `tests/` : tests d'intégration (`cli`, `integration`, `serveur`). `tests/commun` : aides partagées (`dossier_court`, `serie`, faux client Discord).
 
@@ -34,14 +35,14 @@ Le projet reste en français (code, tests, libellés, commits) : ne rien traduir
 
 - Confidentialité : `serveur.filtrer` ne garde qu'une liste fermée de champs (`session_id`, `cwd`, `hook_event_name`, `tool_name`, `agent_id`, `transcript_path`, l'en-tête `X-Claude-Pid`). N'en ajouter un qu'avec une décision écrite dans la spec. Jamais de prompt, de `tool_input`, de chemin de fichier édité dans un log ou sur Discord.
 - Liste blanche des projets : refus par défaut, comparaison de chemins résolus, jamais de nom de dossier seul.
-- Aucun accès réseau. Dépendances : liste fermée de crates, serde, serde_json (preserve_order), indexmap, toml, chrono, similar, libc, log, tray-icon, tao, ctrlc ; tempfile en dev. Aucune autre sans décision écrite.
-- `sessions` reste sans entrée-sortie ; `carte` aussi, sauf une résolution de chemin mise en cache par dossier (`nom_projet` : le volume qui porte un projet peut être mal monté, un `resolve()` non mis en cache bloquerait la boucle carte à 1 s).
+- Aucun accès réseau. Dépendances : liste fermée de crates : serde, serde_json (preserve_order), indexmap, toml, chrono, similar, libc, log, tray-icon, tao, ctrlc ; tempfile en dev. Aucune autre sans décision écrite.
+- `sessions` reste sans entrée-sortie ; `carte` aussi, sauf une résolution de chemin mise en cache par dossier (`nom_projet` : le volume qui porte un projet peut être mal monté, un `resoudre_cwd` non mis en cache bloquerait la boucle carte à 1 s).
 - Discord est mocké dans les tests (faux client, faux Discord IPC), le socket et `curl` sont réels.
 - Libellés en français, ceux de la spec, codés en dur (jamais improvisés).
-- Sous macOS, un chemin de socket Unix est limité à 104 octets : les tests de socket utilisent `commun::dossier_court()`.
+- Sous macOS, un chemin de socket Unix est limité à 104 octets : les tests de socket utilisent `commun::dossier_court()` (tests d'intégration) ou `crate::aides_tests::dossier_court()` (tests unitaires de la lib).
 - Les tests qui démarrent un serveur sont sérialisés par `serie()` (`tests/commun`) : l'umask est global au processus.
 - Les tests ne touchent jamais les vrais chemins utilisateur (`~/.claude`, `~/.config`, `~/Library`, `~/Applications`, `~/.local/bin`) : `installation`, `bundle` et `chemins` sont testés avec des chemins temporaires (`tempfile`), jamais les emplacements réels. Aucun test n'appelle le vrai `launchctl` ni le vrai `codesign` : `executer` est injectable (`installer_launch_agent`, `desinstaller_launch_agent`, `installer_bundle`) et remplacé par un faux dans les tests.
-- Aucun test n'appelle `principal` sans argument : sans argument, il lance le daemon.
+- Aucun test n'appelle `principal` ni `principal_vers` (public) sans argument : sans argument, ils lancent le daemon.
 - Noms des tests : un test porté depuis pytest garde `test_<nom pytest>`, un test nouveau n'a pas de préfixe `test_`.
 - La confirmation de `install`/`uninstall` sur `~/.claude/settings.json` (le « o » explicite) revient à Victor : ne jamais y répondre à sa place, ni la simuler, ni contourner `confirmer_terminal` / `confirmer_depuis` (`cli.rs`).
 - La sauvegarde de `settings.json` et le fichier réécrit gardent tous les deux le mode (droits) de l'original, jamais un mode plus large même sous umask. `config.toml`, s'il est absent, est créé en 0600 avec une liste blanche vide, jamais écrasé s'il existe déjà.

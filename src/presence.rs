@@ -329,7 +329,7 @@ impl ClientDiscord for ClientIpc {
     }
 }
 
-/// Dossiers candidats dans l'ordre de pypresence, puis `discord-ipc-0` à `-9`.
+/// Dossiers candidats dans l'ordre historique des dossiers IPC, puis `discord-ipc-0` à `-9`.
 pub fn chemins_ipc_depuis(lire: impl Fn(&str) -> Option<String>) -> Vec<PathBuf> {
     let base = ["XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"]
         .iter()

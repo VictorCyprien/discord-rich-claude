@@ -1079,7 +1079,7 @@ mod tests {
     }
 
     #[test]
-    fn minuit_local_exceptions_python() {
+    fn minuit_local_valeurs_non_finies() {
         // Là où Python lève : NaN, infini, dépassement de `time_t`, année hors 1..=9999.
         assert_eq!(minuit_selon(&Local, f64::NAN), None);
         assert_eq!(minuit_selon(&Local, f64::INFINITY), None);

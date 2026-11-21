@@ -402,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn est_vue_b_exceptions_python() {
+    fn est_vue_b_valeurs_non_finies() {
         // Là où Python lève : division par zéro, NaN, dépassement.
         assert!(!est_vue_b(1.0, 0.0));
         assert!(!est_vue_b(f64::NAN, 2.0));

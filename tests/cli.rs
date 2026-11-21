@@ -269,8 +269,8 @@ fn test_status_avec_daemon() {
     en_marche.arreter();
 }
 
-/// Faux daemon : un socket Unix qui répond `GET /etat` avec `corps`, comme le test pytest
-/// qui remplaçait `interroger_etat`.
+/// Faux daemon : un socket Unix qui répond `GET /etat` avec `corps`, comme le faisait
+/// le remplacement de `interroger_etat`.
 fn faux_serveur_etat(socket: &Path, corps: &'static str) -> std::thread::JoinHandle<()> {
     use std::io::{Read, Write};
     fs::create_dir_all(socket.parent().unwrap()).unwrap();
