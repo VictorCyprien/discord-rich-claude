@@ -20,11 +20,12 @@ use commun::{
 use discord_rich_claude::bundle::binaire_du_bundle;
 use discord_rich_claude::chemins::Chemins;
 use discord_rich_claude::cli::{
-    confirmer_depuis, desinstaller_vers, installer_vers, lancer_vers, principal, statut_vers,
+    Commande, commande_depuis, confirmer_depuis, desinstaller_vers, installer_vers, lancer_vers,
+    statut_vers,
 };
 use discord_rich_claude::config::ConfigSurveillee;
 use discord_rich_claude::daemon::{Daemon, EnMarche, Mode, demarrer};
-use discord_rich_claude::installation::Sortie;
+use discord_rich_claude::installation::{CODESIGN, LAUNCHCTL, Sortie};
 use discord_rich_claude::presence::Presence;
 use discord_rich_claude::sessions::Evenement;
 use discord_rich_claude::tokens::SuiviTokens;
@@ -269,6 +270,39 @@ fn test_status_avec_daemon() {
     en_marche.arreter();
 }
 
+/// Faux daemon : un socket Unix qui répond `GET /etat` avec `corps`, comme le test pytest
+/// qui remplaçait `interroger_etat`.
+fn faux_serveur_etat(socket: &Path, corps: &'static str) -> std::thread::JoinHandle<()> {
+    use std::io::{Read, Write};
+    fs::create_dir_all(socket.parent().unwrap()).unwrap();
+    let ecouteur = std::os::unix::net::UnixListener::bind(socket).unwrap();
+    std::thread::spawn(move || {
+        if let Ok((mut flux, _)) = ecouteur.accept() {
+            let mut tampon = [0u8; 1024];
+            let _ = flux.read(&mut tampon);
+            let reponse = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corps}",
+                corps.len()
+            );
+            let _ = flux.write_all(reponse.as_bytes());
+        }
+    })
+}
+
+#[test]
+fn status_discord_connecte() {
+    let _s = serie();
+    let (_dossier, chemins) = chemins_temporaires();
+    let fil = faux_serveur_etat(&chemins.socket, r#"{"discord": true, "sessions": 2}"#);
+    let mut sortie = Vec::new();
+    assert_eq!(statut_vers(&chemins, &mut sortie), 0);
+    let sortie = texte(sortie);
+    assert!(sortie.contains("discord : connecté"), "{sortie}");
+    assert!(!sortie.contains("non connecté"), "{sortie}");
+    assert!(sortie.contains("sessions : 2"), "{sortie}");
+    fil.join().unwrap();
+}
+
 #[test]
 fn status_affiche_l_etat() {
     let _s = serie();
@@ -283,9 +317,25 @@ fn status_affiche_l_etat() {
 
 #[test]
 fn test_commande_inconnue() {
-    let _s = serie();
-    assert_eq!(principal(vec!["inconnue".into()]), 2);
-    assert_eq!(principal(vec![]), 2);
+    // `principal` n'est jamais appelé ici : sans argument, le binaire lance le daemon.
+    let args = |v: &[&str]| -> Vec<String> { v.iter().map(|s| s.to_string()).collect() };
+    assert_eq!(commande_depuis(&args(&["inconnue"])), Commande::Inconnue);
+    assert_eq!(
+        commande_depuis(&args(&["inconnue", "run"])),
+        Commande::Inconnue
+    );
+}
+
+#[test]
+fn commande_depuis_sans_argument_ou_psn_lance_run() {
+    let args = |v: &[&str]| -> Vec<String> { v.iter().map(|s| s.to_string()).collect() };
+    assert_eq!(commande_depuis(&[]), Commande::Run);
+    assert_eq!(commande_depuis(&args(&["-psn_0_123"])), Commande::Run);
+    assert_eq!(commande_depuis(&args(&["run"])), Commande::Run);
+    assert_eq!(commande_depuis(&args(&["install"])), Commande::Install);
+    assert_eq!(commande_depuis(&args(&["uninstall"])), Commande::Uninstall);
+    assert_eq!(commande_depuis(&args(&["status"])), Commande::Status);
+    assert_eq!(commande_depuis(&args(&["-x"])), Commande::Inconnue);
 }
 
 // --- install, uninstall ---
@@ -338,7 +388,7 @@ fn test_uninstall_settings_invalide_imprime_sur_stderr_sans_trace_et_retourne_1(
     let r = desinstaller(&chemins, 501, |_| true);
     assert_eq!(r.code, 1);
     assert!(!r.erreur.contains("Traceback"));
-    assert!(r.erreur.contains("hooks"), "{}", r.erreur);
+    assert!(r.erreur.contains("doit être un objet"), "{}", r.erreur);
     assert!(r.erreur.contains("non modifié"));
     assert!(r.appels.is_empty());
 }
@@ -378,7 +428,7 @@ fn test_install_sans_executable_absolu_refuse_et_n_ecrit_rien() {
     assert!(!r.erreur.contains("Traceback"));
     assert!(!chemins.launch_agent.exists());
     assert!(
-        r.appels.iter().all(|a| !a.starts_with("launchctl")),
+        r.appels.iter().all(|a| !a.starts_with(LAUNCHCTL)),
         "{:?}",
         r.appels
     );
@@ -398,19 +448,20 @@ fn test_install_imprime_l_executable_choisi() {
         r.sortie
     );
     for etape in [
-        "1/4 Hooks Claude Code",
-        "2/4 Configuration",
-        "3/4 Application",
-        "4/4 LaunchAgent",
+        "1/5 Hooks Claude Code",
+        "2/5 Configuration",
+        "3/5 Application",
+        "4/5 LaunchAgent",
         "LaunchAgent chargé",
+        "5/5 Commande",
     ] {
         assert!(r.sortie.contains(etape), "{etape} absent de {}", r.sortie);
     }
-    assert!(r.appels.iter().any(|a| a.starts_with("codesign")));
+    assert!(r.appels.iter().any(|a| a.starts_with(CODESIGN)));
     assert!(
         r.appels
             .iter()
-            .any(|a| a.starts_with("launchctl bootstrap"))
+            .any(|a| a.starts_with(&format!("{LAUNCHCTL} bootstrap")))
     );
 }
 
@@ -535,7 +586,7 @@ fn test_install_ecriture_plist_echoue_stderr_sans_trace_et_retourne_1() {
     assert_eq!(r.code, 1);
     assert!(!r.erreur.contains("Traceback"));
     assert!(r.erreur.contains("AlreadyExists"), "{}", r.erreur);
-    assert!(r.appels.iter().all(|a| !a.starts_with("launchctl")));
+    assert!(r.appels.iter().all(|a| !a.starts_with(LAUNCHCTL)));
 }
 
 #[test]
@@ -585,7 +636,11 @@ fn uninstall_retire_hooks_agent_et_bundle_mais_garde_la_config() {
             .join("Discord Rich Claude.app")
             .exists()
     );
-    assert!(r.appels.iter().any(|a| a.starts_with("launchctl bootout")));
+    assert!(
+        r.appels
+            .iter()
+            .any(|a| a.starts_with(&format!("{LAUNCHCTL} bootout")))
+    );
     let settings = fs::read_to_string(&chemins.settings_claude).unwrap();
     assert!(!settings.contains("discord-rich-claude"));
 }
@@ -603,4 +658,126 @@ fn uninstall_refuse_par_l_utilisateur_ne_touche_a_rien() {
     assert!(r.sortie.contains("désinstallation annulée"));
     assert!(chemins.launch_agent.exists());
     assert!(r.appels.is_empty());
+}
+
+// --- lien de commande ~/.local/bin/discord-rich-claude ---
+
+#[test]
+fn install_cree_le_lien_de_commande() {
+    let _s = serie();
+    let (dossier, chemins) = chemins_temporaires();
+    let r = installer(&chemins, &binaire_factice(dossier.path()), 501, true);
+    assert_eq!(r.code, 0, "{}", r.erreur);
+    assert_eq!(
+        fs::read_link(&chemins.lien_commande).unwrap(),
+        binaire_du_bundle(&chemins.applications)
+    );
+    assert!(r.sortie.contains("5/5 Commande"), "{}", r.sortie);
+}
+
+#[test]
+fn install_lien_deja_correct_reste_inchange() {
+    let _s = serie();
+    let (dossier, chemins) = chemins_temporaires();
+    let binaire = binaire_factice(dossier.path());
+    assert_eq!(installer(&chemins, &binaire, 501, true).code, 0);
+    let avant = fs::symlink_metadata(&chemins.lien_commande)
+        .unwrap()
+        .modified()
+        .unwrap();
+    let r = installer(&chemins, &binaire, 501, true);
+    assert_eq!(r.code, 0, "{}", r.erreur);
+    assert_eq!(
+        fs::read_link(&chemins.lien_commande).unwrap(),
+        binaire_du_bundle(&chemins.applications)
+    );
+    let apres = fs::symlink_metadata(&chemins.lien_commande)
+        .unwrap()
+        .modified()
+        .unwrap();
+    assert_eq!(avant, apres);
+}
+
+/// Après un refus, ni `settings.json`, ni le plist, ni le bundle, ni la config n'existent.
+fn verifier_rien_touche(chemins: &Chemins, r: &Resultat) {
+    assert_eq!(r.code, 1, "{}", r.sortie);
+    assert!(
+        r.erreur.contains("uv tool uninstall discord-rich-claude"),
+        "{}",
+        r.erreur
+    );
+    assert!(r.appels.is_empty(), "{:?}", r.appels);
+    assert!(
+        !r.sortie.contains("1/5"),
+        "aucune étape lancée : {}",
+        r.sortie
+    );
+    assert!(!chemins.settings_claude.exists());
+    assert!(!chemins.launch_agent.exists());
+    assert!(!chemins.applications.exists());
+    assert!(!chemins.config.exists());
+}
+
+#[test]
+fn install_refuse_si_un_fichier_occupe_le_lien() {
+    let _s = serie();
+    let (dossier, chemins) = chemins_temporaires();
+    fs::create_dir_all(chemins.lien_commande.parent().unwrap()).unwrap();
+    fs::write(&chemins.lien_commande, "version python").unwrap();
+    let r = installer(&chemins, &binaire_factice(dossier.path()), 501, true);
+    verifier_rien_touche(&chemins, &r);
+    assert_eq!(
+        fs::read_to_string(&chemins.lien_commande).unwrap(),
+        "version python"
+    );
+}
+
+#[test]
+fn install_refuse_si_un_lien_etranger_occupe_le_lien() {
+    let _s = serie();
+    let (dossier, chemins) = chemins_temporaires();
+    let python = dossier.path().join("uv-discord-rich-claude");
+    fs::write(&python, "python").unwrap();
+    fs::create_dir_all(chemins.lien_commande.parent().unwrap()).unwrap();
+    symlink(&python, &chemins.lien_commande).unwrap();
+    let r = installer(&chemins, &binaire_factice(dossier.path()), 501, true);
+    verifier_rien_touche(&chemins, &r);
+    assert_eq!(fs::read_link(&chemins.lien_commande).unwrap(), python);
+}
+
+#[test]
+fn install_refuse_si_un_dossier_occupe_le_lien() {
+    let _s = serie();
+    let (dossier, chemins) = chemins_temporaires();
+    fs::create_dir_all(&chemins.lien_commande).unwrap();
+    let r = installer(&chemins, &binaire_factice(dossier.path()), 501, true);
+    verifier_rien_touche(&chemins, &r);
+    assert!(chemins.lien_commande.is_dir());
+}
+
+#[test]
+fn uninstall_retire_notre_lien() {
+    let _s = serie();
+    let (dossier, chemins) = chemins_temporaires();
+    assert_eq!(
+        installer(&chemins, &binaire_factice(dossier.path()), 501, true).code,
+        0
+    );
+    let r = desinstaller(&chemins, 501, |_| true);
+    assert_eq!(r.code, 0, "{}", r.erreur);
+    assert!(fs::symlink_metadata(&chemins.lien_commande).is_err());
+}
+
+#[test]
+fn uninstall_laisse_un_lien_etranger() {
+    let _s = serie();
+    let (dossier, chemins) = chemins_temporaires();
+    let python = dossier.path().join("uv-discord-rich-claude");
+    fs::write(&python, "python").unwrap();
+    fs::create_dir_all(chemins.lien_commande.parent().unwrap()).unwrap();
+    symlink(&python, &chemins.lien_commande).unwrap();
+    let r = desinstaller(&chemins, 501, |_| true);
+    assert_eq!(r.code, 0, "{}", r.erreur);
+    assert_eq!(fs::read_link(&chemins.lien_commande).unwrap(), python);
+    assert!(r.erreur.contains("laissé en place"), "{}", r.erreur);
 }

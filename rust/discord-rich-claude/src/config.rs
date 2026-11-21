@@ -657,7 +657,19 @@ mod tests {
 
     #[test]
     fn test_config_par_defaut_texte_exact() {
-        assert!(CONFIG_PAR_DEFAUT.starts_with("# Configuration de discord-rich-claude.\n"));
-        assert!(CONFIG_PAR_DEFAUT.ends_with("autorises = []\n"));
+        // Le texte exact de `CONFIG_PAR_DEFAUT` du Python.
+        assert_eq!(
+            CONFIG_PAR_DEFAUT,
+            "# Configuration de discord-rich-claude.\n\
+             # ID de l'application Discord : Developer Portal > General Information > Application ID.\n\
+             client_id = \"\"\n\
+             inactif_apres_min = 10\n\
+             masquer_apres_min = 60\n\
+             rotation_s = 20\n\
+             \n\
+             [projets]\n\
+             # Refusé par défaut : seuls ces dossiers (chemins complets) affichent leur nom.\n\
+             autorises = []\n"
+        );
     }
 }

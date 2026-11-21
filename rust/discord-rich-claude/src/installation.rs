@@ -355,6 +355,10 @@ pub struct Sortie {
     pub stderr: Vec<u8>,
 }
 
+/// Chemins absolus des outils système : jamais cherchés dans le `PATH`.
+pub const LAUNCHCTL: &str = "/bin/launchctl";
+pub const CODESIGN: &str = "/usr/bin/codesign";
+
 pub type Executeur<'a> = &'a mut dyn FnMut(&[&str]) -> io::Result<Sortie>;
 
 /// Exécuteur de production : lance la commande et capture sa sortie.
@@ -451,12 +455,12 @@ pub fn installer_launch_agent(
     }
     ecrire_fichier_atomique(chemin_plist, contenu, 0o600)?;
     // Décharge une version précédente ; échoue sans conséquence si rien n'est chargé.
-    let _ = executer(&["launchctl", "bootout", &format!("{domaine}/{LABEL}")]);
+    let _ = executer(&[LAUNCHCTL, "bootout", &format!("{domaine}/{LABEL}")]);
     // `bootstrap` juste après un `bootout` échoue par intermittence (code 5 ou 37)
     // tant que l'ancienne instance finit de se décharger : quelques essais suffisent.
     let chemin = chemin_plist.to_string_lossy().into_owned();
     for tentative in 1..=REESSAIS_BOOTSTRAP {
-        let sortie = executer(&["launchctl", "bootstrap", &domaine, &chemin])?;
+        let sortie = executer(&[LAUNCHCTL, "bootstrap", &domaine, &chemin])?;
         if sortie.code == 0 {
             return Ok(());
         }
@@ -476,7 +480,7 @@ pub fn desinstaller_launch_agent(
     uid: u32,
     executer: Executeur,
 ) -> io::Result<()> {
-    let _ = executer(&["launchctl", "bootout", &format!("gui/{uid}/{LABEL}")]);
+    let _ = executer(&[LAUNCHCTL, "bootout", &format!("gui/{uid}/{LABEL}")]);
     match fs::remove_file(chemin_plist) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
         _ => Ok(()),
@@ -893,6 +897,23 @@ mod tests {
     }
 
     #[test]
+    fn test_modifier_settings_transformer_non_serialisable_ne_laisse_rien() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("settings.json");
+        let contenu_initial = br#"{"model": "opus"}"#;
+        fs::write(&f, contenu_initial).unwrap();
+        let res = modifier_settings(
+            &f,
+            |_| Err("objet non sérialisable".to_string()),
+            |_| true,
+            horloge,
+        );
+        assert!(res.is_err());
+        assert_eq!(fs::read(&f).unwrap(), contenu_initial);
+        assert_eq!(noms(d.path()), ["settings.json".to_string()].into());
+    }
+
+    #[test]
     fn test_retirer_laisse_intacte_une_valeur_d_evenement_qui_est_un_objet() {
         let s = json!({"hooks": {"Stop": {"matcher": "x", "hooks": [tiers()]}}});
         assert_eq!(retirer_hooks(&s).unwrap(), s);
@@ -1025,12 +1046,12 @@ mod tests {
             appels,
             vec![
                 vec![
-                    "launchctl".to_string(),
+                    LAUNCHCTL.to_string(),
                     "bootout".into(),
                     format!("{domaine}/{LABEL}")
                 ],
                 vec![
-                    "launchctl".to_string(),
+                    LAUNCHCTL.to_string(),
                     "bootstrap".into(),
                     domaine,
                     chemin.to_string_lossy().into_owned()
@@ -1050,7 +1071,7 @@ mod tests {
         assert_eq!(
             appels,
             vec![vec![
-                "launchctl".to_string(),
+                LAUNCHCTL.to_string(),
                 "bootout".into(),
                 format!("gui/501/{LABEL}")
             ]]

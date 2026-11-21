@@ -25,6 +25,8 @@ pub struct Chemins {
     pub settings_claude: PathBuf,
     pub launch_agent: PathBuf,
     pub applications: PathBuf,
+    /// Lien `~/.local/bin/discord-rich-claude` vers le binaire du bundle.
+    pub lien_commande: PathBuf,
 }
 
 impl Chemins {
@@ -52,6 +54,7 @@ impl Chemins {
                 .join("LaunchAgents")
                 .join(format!("{LABEL}.plist")),
             applications: home.join("Applications"),
+            lien_commande: home.join(".local").join("bin").join("discord-rich-claude"),
         }
     }
 
@@ -157,6 +160,10 @@ mod tests {
             Path::new("/h/Library/LaunchAgents/local.discord-rich-claude.plist")
         );
         assert_eq!(c.applications, Path::new("/h/Applications"));
+        assert_eq!(
+            c.lien_commande,
+            Path::new("/h/.local/bin/discord-rich-claude")
+        );
     }
 
     #[test]

@@ -8,7 +8,10 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::bundle::{binaire_du_bundle, desinstaller_bundle, installer_bundle};
+use crate::bundle::{
+    EtatLien, binaire_du_bundle, desinstaller_bundle, etat_lien, installer_bundle, poser_lien,
+    retirer_lien,
+};
 use crate::chemins::{COMMANDE_HOOK, Chemins};
 use crate::config::{ConfigSurveillee, creer_config_par_defaut};
 use crate::daemon::{Daemon, EnMarche, Mode, demarrer, horloge_systeme};
@@ -154,7 +157,29 @@ pub fn installer_vers(
     if euid == 0 {
         return refus_sudo(erreur);
     }
-    ecrire(sortie, "1/4 Hooks Claude Code");
+    // Avant toute autre étape : si une autre entrée occupe le lien, rien n'est modifié.
+    let binaire_bundle = binaire_du_bundle(&chemins.applications);
+    let lien_a_creer = match etat_lien(&chemins.lien_commande, &binaire_bundle) {
+        Ok(EtatLien::Occupe) => {
+            ecrire(
+                erreur,
+                &format!(
+                    "{} existe déjà (version Python ?) : lance d'abord `uv tool uninstall discord-rich-claude`, puis relance `discord-rich-claude install`",
+                    chemins.lien_commande.display()
+                ),
+            );
+            return 1;
+        }
+        Ok(etat) => etat == EtatLien::Absent,
+        Err(e) => {
+            ecrire(
+                erreur,
+                &format!("  {:?} : {}", e.kind(), chemins.lien_commande.display()),
+            );
+            return 1;
+        }
+    };
+    ecrire(sortie, "1/5 Hooks Claude Code");
     let resultat = match modifier_settings(
         &chemins.settings_claude,
         |s| ajouter_hooks(s, COMMANDE_HOOK),
@@ -173,7 +198,7 @@ pub fn installer_vers(
     }
     ecrire(sortie, &format!("  {resultat}"));
 
-    ecrire(sortie, "2/4 Configuration");
+    ecrire(sortie, "2/5 Configuration");
     match creer_config_par_defaut(&chemins.config) {
         Ok(true) => ecrire(
             sortie,
@@ -195,7 +220,7 @@ pub fn installer_vers(
         }
     }
 
-    ecrire(sortie, "3/4 Application");
+    ecrire(sortie, "3/5 Application");
     let executable = match installer_bundle(&chemins.applications, binaire_courant, &mut *executer)
     {
         Ok(e) => e,
@@ -209,7 +234,7 @@ pub fn installer_vers(
     };
     ecrire(sortie, &format!("  exécutable : {}", executable.display()));
 
-    ecrire(sortie, "4/4 LaunchAgent");
+    ecrire(sortie, "4/5 LaunchAgent");
     if let Err(e) = std::fs::create_dir_all(&chemins.dossier_logs) {
         ecrire(
             erreur,
@@ -243,6 +268,30 @@ pub fn installer_vers(
         }
     }
     ecrire(sortie, "  LaunchAgent chargé");
+
+    ecrire(sortie, "5/5 Commande");
+    if lien_a_creer {
+        if let Err(e) = poser_lien(&chemins.lien_commande, &binaire_bundle) {
+            ecrire(
+                erreur,
+                &format!("  {:?} : {}", e.kind(), chemins.lien_commande.display()),
+            );
+            return 1;
+        }
+        ecrire(
+            sortie,
+            &format!(
+                "  lien créé : {} -> {}",
+                chemins.lien_commande.display(),
+                binaire_bundle.display()
+            ),
+        );
+    } else {
+        ecrire(
+            sortie,
+            &format!("  déjà présent : {}", chemins.lien_commande.display()),
+        );
+    }
     0
 }
 
@@ -303,6 +352,33 @@ pub fn desinstaller_vers(
         );
         return 1;
     }
+    let binaire_bundle = binaire_du_bundle(&chemins.applications);
+    match etat_lien(&chemins.lien_commande, &binaire_bundle) {
+        Ok(EtatLien::Absent) => {}
+        Ok(EtatLien::Correct) => {
+            if let Err(e) = retirer_lien(&chemins.lien_commande, &binaire_bundle) {
+                ecrire(
+                    erreur,
+                    &format!("  {:?} : {}", e.kind(), chemins.lien_commande.display()),
+                );
+                return 1;
+            }
+        }
+        Ok(EtatLien::Occupe) => ecrire(
+            erreur,
+            &format!(
+                "{} n'est pas notre lien : laissé en place",
+                chemins.lien_commande.display()
+            ),
+        ),
+        Err(e) => {
+            ecrire(
+                erreur,
+                &format!("  {:?} : {}", e.kind(), chemins.lien_commande.display()),
+            );
+            return 1;
+        }
+    }
     ecrire(
         sortie,
         &format!(
@@ -351,10 +427,36 @@ fn menu_reel(daemon: Arc<Daemon>, en_marche: EnMarche) -> i32 {
     crate::menu::lancer_menu(daemon, en_marche)
 }
 
+/// Commande demandée par la ligne de commande.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Commande {
+    Run,
+    Install,
+    Uninstall,
+    Status,
+    Inconnue,
+}
+
+/// Analyse pure des arguments (après le nom du programme). Aucun argument, ou seulement
+/// des arguments `-psn_…` (ancien LaunchServices), équivaut à `run` : c'est ce que lance
+/// l'ouverture de l'app depuis Spotlight ou le Launchpad.
+pub fn commande_depuis(args: &[String]) -> Commande {
+    if args.iter().all(|a| a.starts_with("-psn_")) {
+        return Commande::Run;
+    }
+    match args.first().map(String::as_str) {
+        Some("run") => Commande::Run,
+        Some("install") => Commande::Install,
+        Some("uninstall") => Commande::Uninstall,
+        Some("status") => Commande::Status,
+        _ => Commande::Inconnue,
+    }
+}
+
 /// Point d'entrée : `args` sont les arguments après le nom du programme.
 pub fn principal(args: Vec<String>) -> i32 {
-    let commande = args.first().map(String::as_str);
-    if !matches!(commande, Some("run" | "install" | "uninstall" | "status")) {
+    let commande = commande_depuis(&args);
+    if commande == Commande::Inconnue {
         eprintln!("{USAGE}");
         return 2;
     }
@@ -365,12 +467,12 @@ pub fn principal(args: Vec<String>) -> i32 {
     // SAFETY : `geteuid` n'a aucun effet de bord.
     let euid = unsafe { libc::geteuid() };
     match commande {
-        Some("run") => {
+        Commande::Run => {
             installer_hook_panique();
             configurer_logs(&chemins.dossier_logs);
             lancer(&chemins, menu_reel)
         }
-        Some("install") => match std::env::current_exe() {
+        Commande::Install => match std::env::current_exe() {
             Ok(binaire) => installer_avec(&chemins, &binaire, euid, &mut executeur_reel, |diff| {
                 confirmer_terminal(&chemins.settings_claude, diff)
             }),
@@ -379,7 +481,7 @@ pub fn principal(args: Vec<String>) -> i32 {
                 1
             }
         },
-        Some("uninstall") => desinstaller_avec(&chemins, euid, &mut executeur_reel, |diff| {
+        Commande::Uninstall => desinstaller_avec(&chemins, euid, &mut executeur_reel, |diff| {
             confirmer_terminal(&chemins.settings_claude, diff)
         }),
         _ => statut(&chemins),

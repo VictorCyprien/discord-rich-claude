@@ -6,7 +6,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::installation::{
-    ENTETE_PLIST, Executeur, ecrire_atomique, ecrire_fichier_atomique, plist_chaine,
+    CODESIGN, ENTETE_PLIST, Executeur, ecrire_atomique, ecrire_fichier_atomique, plist_chaine,
 };
 
 pub const NOM_BUNDLE: &str = "Discord Rich Claude.app";
@@ -32,6 +32,48 @@ pub fn binaire_du_bundle(applications: &Path) -> PathBuf {
         .join("Contents")
         .join("MacOS")
         .join(NOM_BINAIRE)
+}
+
+/// État du lien de commande `~/.local/bin/discord-rich-claude`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EtatLien {
+    /// Rien à ce chemin : à créer.
+    Absent,
+    /// Lien symbolique dont la cible est exactement le binaire du bundle.
+    Correct,
+    /// Autre chose (fichier, lien vers ailleurs, dossier) : jamais touché.
+    Occupe,
+}
+
+pub fn etat_lien(lien: &Path, binaire: &Path) -> io::Result<EtatLien> {
+    match fs::symlink_metadata(lien) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(EtatLien::Absent),
+        Err(e) => Err(e),
+        Ok(m) if m.file_type().is_symlink() && fs::read_link(lien)? == binaire => {
+            Ok(EtatLien::Correct)
+        }
+        Ok(_) => Ok(EtatLien::Occupe),
+    }
+}
+
+/// Crée `~/.local/bin` si besoin, puis le lien. Ne remplace jamais une entrée existante.
+pub fn poser_lien(lien: &Path, binaire: &Path) -> io::Result<()> {
+    if etat_lien(lien, binaire)? == EtatLien::Correct {
+        return Ok(());
+    }
+    if let Some(parent) = lien.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    std::os::unix::fs::symlink(binaire, lien)
+}
+
+/// Retire le lien seulement s'il pointe exactement vers `binaire`. Rend `true` s'il a été retiré.
+pub fn retirer_lien(lien: &Path, binaire: &Path) -> io::Result<bool> {
+    if etat_lien(lien, binaire)? != EtatLien::Correct {
+        return Ok(false);
+    }
+    fs::remove_file(lien)?;
+    Ok(true)
 }
 
 fn erreur_io(action: &str, e: &io::Error) -> String {
@@ -85,7 +127,7 @@ pub fn installer_bundle(
     }
 
     let chemin_app = app.to_string_lossy().into_owned();
-    let sortie = executer(&["codesign", "--force", "--sign", "-", &chemin_app])
+    let sortie = executer(&[CODESIGN, "--force", "--sign", "-", &chemin_app])
         .map_err(|e| erreur_io("lancement de codesign", &e))?;
     if sortie.code != 0 {
         return Err(format!(
@@ -165,7 +207,7 @@ mod tests {
         assert_eq!(
             appels,
             vec![vec![
-                "codesign".to_string(),
+                CODESIGN.to_string(),
                 "--force".into(),
                 "--sign".into(),
                 "-".into(),

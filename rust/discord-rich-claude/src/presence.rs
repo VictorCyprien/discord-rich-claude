@@ -307,12 +307,23 @@ impl ClientDiscord for ClientIpc {
     }
 
     fn fermer(&mut self) -> Result<(), ErreurDiscord> {
-        let corps = json!({"v": 1, "client_id": self.client_id});
-        let _ = self.ecrire(OP_FERMETURE, &corps);
-        if let Some(flux) = self.flux.take() {
-            let _ = flux.shutdown(std::net::Shutdown::Both);
+        // Jamais connecté (ou déjà fermé) : rien à fermer, pas d'erreur.
+        if self.flux.is_none() {
+            return Ok(());
         }
-        Ok(())
+        // La fermeture est complète dans tous les cas : le socket est libéré même si
+        // l'envoi de la trame échoue. On rend la première erreur rencontrée.
+        let corps = json!({"v": 1, "client_id": self.client_id});
+        let envoi = self.ecrire(OP_FERMETURE, &corps);
+        let arret = match self.flux.take() {
+            Some(flux) => match flux.shutdown(std::net::Shutdown::Both) {
+                // Le pair est déjà parti : rien de plus à fermer.
+                Err(e) if e.kind() != io::ErrorKind::NotConnected => Err(erreur_io(&e)),
+                _ => Ok(()),
+            },
+            None => Ok(()),
+        };
+        envoi.and(arret)
     }
 }
 
@@ -398,6 +409,7 @@ mod tests {
         echec_connexion: bool,
         echec_publication: bool,
         echec_effacement: bool,
+        echec_fermeture: bool,
         erreurs_connexion: Arc<Mutex<Vec<&'static str>>>,
     }
 
@@ -444,6 +456,9 @@ mod tests {
         }
         fn fermer(&mut self) -> Result<(), ErreurDiscord> {
             self.journal.lock().unwrap().push("fermer".into());
+            if self.options.echec_fermeture {
+                return Err(CONNEXION_FERMEE);
+            }
             Ok(())
         }
     }
@@ -598,6 +613,33 @@ mod tests {
         assert_eq!(
             j[j.len() - 4..],
             ["effacer", "fermer", "connecter:43", "publier:A"]
+        );
+    }
+
+    #[test]
+    fn test_fermeture_echouee_loggee_en_warning() {
+        // Une étape de fermeture qui échoue est loggée en WARNING, jamais silencieuse, et
+        // `fermer` ne relève rien.
+        init_logs();
+        let (journal, h) = (Journal::default(), Horloge::default());
+        let options = Options {
+            echec_fermeture: true,
+            ..Options::default()
+        };
+        let mut p = presence_avec(&journal, &h, options, 0.0);
+        p.soumettre(Some(&carte("A")), Some("42"));
+        LOGS.with(|l| l.borrow_mut().clear());
+        p.fermer();
+        let logs = LOGS.with(|l| l.borrow().clone());
+        let avertissements: Vec<&String> = logs
+            .iter()
+            .filter(|(n, _)| *n == log::Level::Warn)
+            .map(|(_, m)| m)
+            .collect();
+        assert_eq!(avertissements.len(), 1, "{logs:?}");
+        assert!(
+            avertissements[0].contains(CONNEXION_FERMEE.genre),
+            "{avertissements:?}"
         );
     }
 
@@ -890,6 +932,26 @@ mod tests {
         assert_eq!(op, 2);
         assert_eq!(json, json!({"v": 1, "client_id": "42"}));
         assert_eq!(eof, 0);
+    }
+
+    #[test]
+    fn fermer_rend_la_premiere_erreur_et_libere_quand_meme_le_socket() {
+        // Le pair est parti : l'envoi de la trame de fermeture échoue.
+        let (nous, pair) = UnixStream::pair().unwrap();
+        drop(pair);
+        let mut c = ClientIpc::new("42", vec![]);
+        c.flux = Some(nous);
+        assert_eq!(c.fermer(), Err(CONNEXION_FERMEE));
+        assert!(
+            c.flux.is_none(),
+            "le socket est libéré même après une erreur"
+        );
+    }
+
+    #[test]
+    fn fermer_sans_connexion_ne_rend_pas_d_erreur() {
+        let mut c = ClientIpc::new("42", vec![]);
+        assert_eq!(c.fermer(), Ok(()));
     }
 
     #[test]

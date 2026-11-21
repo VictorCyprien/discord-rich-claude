@@ -125,6 +125,12 @@ impl Daemon {
         format!("{:?}", verrou(&self.etat).registre.sessions)
     }
 
+    /// Tokens du jour calculés au dernier tour de contrôle, pour les tests.
+    #[doc(hidden)]
+    pub fn tokens_jour(&self) -> i64 {
+        verrou(&self.etat).tokens_jour
+    }
+
     pub fn recevoir(&self, ev: Evenement) {
         let mut etat = verrou(&self.etat);
         if etat.mode == Mode::Arrete {
@@ -192,6 +198,10 @@ impl Daemon {
                 log::error!("client_id absent : pas de connexion à Discord");
             }
             etat.premier_controle = false;
+            // À l'arrêt : ni purge, ni lecture de transcript, ni calcul de tokens.
+            if etat.mode == Mode::Arrete {
+                return;
+            }
             let inactif_s = etat.config.valeur.inactif_apres_min * 60.0;
             etat.registre
                 .purger(maintenant, inactif_s, |pid| (self.pid_vivant)(pid));

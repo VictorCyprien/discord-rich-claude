@@ -262,16 +262,18 @@ fn test_client_id_absent_logge_une_erreur_au_demarrage_et_apres_rechargement() {
     installer_capture();
     vider_messages();
     let b = banc(|_| String::new(), false);
-    let erreurs = || {
+    // Comme le Python : toutes les lignes ERROR comptent, pas seulement celles du `client_id`.
+    let erreurs = || -> Vec<String> {
         messages()
-            .iter()
-            .filter(|m| m.starts_with("ERROR ") && m.contains("client_id absent"))
-            .count()
+            .into_iter()
+            .filter(|m| m.starts_with("ERROR "))
+            .collect()
     };
     for _ in 0..3 {
         b.daemon.controler();
     }
-    assert_eq!(erreurs(), 1);
+    assert_eq!(erreurs().len(), 1, "{:?}", erreurs());
+    assert!(erreurs()[0].contains("client_id absent"), "{:?}", erreurs());
 
     fs::write(&b.config, "inactif_apres_min = 5\n").unwrap();
     // la date de modification doit changer d'au moins un instant
@@ -279,7 +281,7 @@ fn test_client_id_absent_logge_une_erreur_au_demarrage_et_apres_rechargement() {
     f.set_modified(std::time::SystemTime::now() + Duration::from_secs(5))
         .unwrap();
     b.daemon.controler();
-    assert_eq!(erreurs(), 2);
+    assert_eq!(erreurs().len(), 2, "{:?}", erreurs());
 }
 
 #[test]
@@ -348,6 +350,22 @@ fn arreter_ignore_les_hooks_et_ferme_discord() {
     std::thread::sleep(Duration::from_millis(1300)); // un tour de la boucle carte
     assert_eq!(b.journal.lock().unwrap().len(), avant);
     en_marche.arreter();
+}
+
+#[test]
+fn controle_arrete_ne_lit_aucun_transcript() {
+    // En `Arrete`, le tour de contrôle sort tôt : ni lecture des transcripts du jour, ni
+    // calcul de tokens (les fichiers du jour seraient relus toutes les 30 s pour rien).
+    let _s = serie();
+    let b = banc(config_ordinaire, true);
+    ecrire_transcript(&b.projets_claude.join("p/s1.jsonl"));
+    b.daemon.controler();
+    assert_eq!(b.daemon.tokens_jour(), 115, "témoin : en Allumé, il lit");
+
+    b.daemon.changer_mode(Mode::Arrete);
+    assert_eq!(b.daemon.tokens_jour(), 0);
+    b.daemon.controler();
+    assert_eq!(b.daemon.tokens_jour(), 0);
 }
 
 #[test]

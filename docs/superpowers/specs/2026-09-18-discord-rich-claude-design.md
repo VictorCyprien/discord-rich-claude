@@ -310,5 +310,6 @@ Trois états, tenus en mémoire. Au lancement du daemon (login compris), l'état
 
 - `install` crée `~/Applications/Discord Rich Claude.app` : un bundle minimal avec `Info.plist` (`LSUIElement` à vrai, pas d'icône dans le Dock) et le binaire. Signature ad hoc (`codesign -s -`), sans notarisation.
 - Le LaunchAgent lance le binaire du bundle, avec `RunAtLoad` et sans `KeepAlive`, pour que « Quitter » ne le relance pas.
+- `install` pose aussi le lien `~/.local/bin/discord-rich-claude` vers le binaire du bundle. Il refuse, sans rien modifier, si une autre entrée occupe ce chemin (par exemple le lien de la version Python posé par `uv tool`). `uninstall` retire ce lien seulement s'il pointe vers le binaire du bundle.
 - `uninstall` retire nos hooks, le LaunchAgent et le bundle ; il garde la config. Le « o » explicite sur `settings.json`, le refus de tourner en root, les sauvegardes et les droits de 8 ne changent pas.
-- CLI : `run`, `install`, `uninstall`, `status`. Pas de `pause` ni `resume` en ligne de commande : seul le menu change l'état.
+- CLI : `run`, `install`, `uninstall`, `status`. Ouvrir l'app (aucun argument) équivaut à `run` ; c'est la façon de relancer après Quitter. Pas de `pause` ni `resume` en ligne de commande : seul le menu change l'état.
