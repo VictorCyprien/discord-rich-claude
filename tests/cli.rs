@@ -724,9 +724,35 @@ fn install_migre_l_ancien_bundle_et_son_lien() {
     );
     assert_eq!(fs::read_link(&chemins.lien_commande).unwrap(), nouveau);
     let agent = r.sortie.find("LaunchAgent chargé").unwrap();
+    let lien = r.sortie.find("lien mis à jour : ").expect(&r.sortie);
     let retire = r.sortie.find("ancienne app retirée").expect(&r.sortie);
-    assert!(agent < retire, "{}", r.sortie);
-    assert!(r.sortie.contains("lien mis à jour : "), "{}", r.sortie);
+    assert!(agent < lien && lien < retire, "{}", r.sortie);
+}
+
+#[test]
+fn install_launchctl_en_echec_garde_l_ancien_bundle_et_son_lien() {
+    let _s = serie();
+    let (dossier, chemins) = chemins_temporaires();
+    let ancien = poser_ancienne_installation(&chemins);
+    let r = installer_avec_executeur(
+        &chemins,
+        &binaire_factice(dossier.path()),
+        501,
+        |_| true,
+        |c| {
+            if c.get(1) == Some(&"bootstrap") {
+                Ok(Sortie {
+                    code: 1,
+                    stderr: b"boom".to_vec(),
+                })
+            } else {
+                ok()
+            }
+        },
+    );
+    assert_eq!(r.code, 1);
+    assert!(ancien.exists());
+    assert_eq!(fs::read_link(&chemins.lien_commande).unwrap(), ancien);
 }
 
 #[test]

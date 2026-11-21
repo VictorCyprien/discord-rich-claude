@@ -22,7 +22,7 @@ Prérequis : macOS, la toolchain Rust (`cargo`, installé via [rustup](https://r
 
    1. **Hooks Claude Code.** Il te montre la différence sur `~/.claude/settings.json` et attend un « o » explicite (Ctrl-C ou Ctrl-D = refus, rien n'est modifié). S'il relit le fichier et le trouve changé entre-temps, il n'écrit rien et affiche « settings.json non modifié : … » : relance simplement la commande. Il sauvegarde l'ancien fichier en `settings.json.bak-AAAAMMJJ-HHMMSS` (jamais écrasée) avant d'écrire le nouveau de façon atomique, en gardant les hooks des autres outils ; la sauvegarde et le fichier réécrit gardent tous les deux le mode (droits) de l'original.
    2. **Configuration.** Il crée `config.toml` s'il est absent (0600, liste blanche vide, jamais écrasé).
-   3. **Application.** Il copie le binaire dans `~/Applications/Clauderune.app` (bundle minimal avec son icône, signé ad hoc, sans notarisation) et affiche « exécutable : … ». Si l'ancienne app `Discord Rich Claude.app` est présente, elle est retirée une fois le LaunchAgent chargé (voir Migration).
+   3. **Application.** Il copie le binaire dans `~/Applications/Clauderune.app` (bundle minimal avec son icône, signé ad hoc, sans notarisation) et affiche « exécutable : … ». Si l'ancienne app `Discord Rich Claude.app` est présente, elle est retirée en dernier, une fois le LaunchAgent chargé et le lien posé (voir Migration).
    4. **LaunchAgent.** Il écrit et charge `~/Library/LaunchAgents/local.discord-rich-claude.plist`, qui lance le binaire du bundle à l'ouverture de ta session macOS, puis affiche « LaunchAgent chargé ».
    5. **Commande.** Il pose le lien `~/.local/bin/discord-rich-claude` vers le binaire du bundle. Il refuse, sans rien modifier, si une autre entrée occupe ce chemin. Un lien qui vise l'ancienne app est remplacé (« lien mis à jour »). Pour une migration depuis l'ancienne version Python, lance d'abord `uv tool uninstall discord-rich-claude`.
 
@@ -93,7 +93,7 @@ La clé doit désigner un chemin de `autorises` (comparé après résolution) ; 
 
 ## Migration
 
-Avant Clauderune, l'app s'appelait `Discord Rich Claude.app`. `install` la retire après avoir chargé le LaunchAgent (`ancienne app retirée : …`) et met à jour le lien `~/.local/bin/discord-rich-claude` s'il visait l'ancien binaire. Si l'ancienne app ne peut pas être retirée, `install` le signale (`ancienne app laissée en place : …`) et continue.
+Avant Clauderune, l'app s'appelait `Discord Rich Claude.app`. `install` la retire en dernier, après avoir chargé le LaunchAgent et posé le lien (`ancienne app retirée : …`) et met à jour le lien `~/.local/bin/discord-rich-claude` s'il visait l'ancien binaire. Si l'ancienne app ne peut pas être retirée, `install` le signale (`ancienne app laissée en place : …`) et continue.
 
 ## Commandes
 

@@ -268,19 +268,6 @@ pub fn installer_vers(
         }
     }
     ecrire(sortie, "  LaunchAgent chargé");
-    // Seulement après le LaunchAgent : l'ancien bundle reste utilisable tant que le nouveau ne l'est pas.
-    let ancien = chemins.applications.join(NOM_ANCIEN_BUNDLE);
-    match retirer_ancien_bundle(&chemins.applications) {
-        Ok(true) => ecrire(
-            sortie,
-            &format!("  ancienne app retirée : {}", ancien.display()),
-        ),
-        Ok(false) => {}
-        Err(_) => ecrire(
-            erreur,
-            &format!("  ancienne app laissée en place : {}", ancien.display()),
-        ),
-    }
 
     ecrire(sortie, "5/5 Commande");
     if etat_du_lien != EtatLien::Correct {
@@ -309,6 +296,19 @@ pub fn installer_vers(
             sortie,
             &format!("  déjà présent : {}", chemins.lien_commande.display()),
         );
+    }
+    // Seulement après le LaunchAgent et le lien : tant que l'un échoue, l'ancien bundle garde la commande vivante.
+    let ancien = chemins.applications.join(NOM_ANCIEN_BUNDLE);
+    match retirer_ancien_bundle(&chemins.applications) {
+        Ok(true) => ecrire(
+            sortie,
+            &format!("  ancienne app retirée : {}", ancien.display()),
+        ),
+        Ok(false) => {}
+        Err(_) => ecrire(
+            erreur,
+            &format!("  ancienne app laissée en place : {}", ancien.display()),
+        ),
     }
     0
 }
