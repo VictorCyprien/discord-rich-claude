@@ -3,6 +3,7 @@
 //! Tout défaut de config retombe sur `Config::default()` : aucun projet
 //! autorisé, pas de `client_id`, donc rien de montré (refus par défaut).
 
+use std::collections::BTreeMap;
 use std::ffi::{CStr, CString, OsStr, OsString};
 use std::fs::OpenOptions;
 use std::io::{self, Write};
@@ -19,6 +20,8 @@ pub struct Config {
     pub masquer_apres_min: f64,
     pub rotation_s: f64,
     pub projets_autorises: Vec<PathBuf>,
+    /// Alias d'affichage : clé = chemin autorisé résolu.
+    pub alias: BTreeMap<PathBuf, String>,
 }
 
 impl Default for Config {
@@ -29,6 +32,7 @@ impl Default for Config {
             masquer_apres_min: 60.0,
             rotation_s: 20.0,
             projets_autorises: Vec::new(),
+            alias: BTreeMap::new(),
         }
     }
 }
@@ -69,7 +73,7 @@ pub fn charger(chemin: &Path) -> Config {
     }
 }
 
-fn valider(brut: &toml::Table, home: Option<&OsStr>) -> Result<Config, String> {
+pub(crate) fn valider(brut: &toml::Table, home: Option<&OsStr>) -> Result<Config, String> {
     let client_id = match brut.get("client_id") {
         None => None,
         Some(toml::Value::String(s)) if s.is_empty() => None,
@@ -92,14 +96,29 @@ fn valider(brut: &toml::Table, home: Option<&OsStr>) -> Result<Config, String> {
     };
     let mut chemins = Vec::new();
     for p in autorises {
-        let developpe =
-            developper_tilde(p, home).ok_or_else(|| format!("chemin invalide refusé : {p}"))?;
-        if !developpe.is_absolute() {
-            return Err(format!("chemin relatif refusé : {p}"));
+        chemins.push(resoudre_entree(p, home)?);
+    }
+    let mut alias = BTreeMap::new();
+    if let Some(toml::Value::Table(projets)) = brut.get("projets") {
+        match projets.get("alias") {
+            None => {}
+            Some(toml::Value::Table(table)) => {
+                for (cle, valeur) in table {
+                    let resolu = resoudre_entree(cle, home)
+                        .map_err(|_| "alias pour un chemin non autorisé".to_string())?;
+                    if !chemins.contains(&resolu) {
+                        return Err("alias pour un chemin non autorisé".to_string());
+                    }
+                    match valeur {
+                        toml::Value::String(a) if alias_valide(a) => {
+                            alias.insert(resolu, a.clone());
+                        }
+                        _ => return Err("alias invalide".to_string()),
+                    }
+                }
+            }
+            Some(_) => return Err("projets.alias doit être une table".to_string()),
         }
-        let resolu =
-            resoudre(&developpe, false).map_err(|_| format!("chemin invalide refusé : {p}"))?;
-        chemins.push(resolu);
     }
     Ok(Config {
         client_id,
@@ -119,7 +138,30 @@ fn valider(brut: &toml::Table, home: Option<&OsStr>) -> Result<Config, String> {
         )?,
         rotation_s: borne(brut.get("rotation_s"), 20.0, "rotation_s", 5.0, 3600.0)?,
         projets_autorises: chemins,
+        alias,
     })
+}
+
+/// Longueur maximale d'un alias, en caractères.
+pub const ALIAS_MAX: usize = 32;
+
+/// Un alias est non vide, sans espace en bordure, d'au plus `ALIAS_MAX`
+/// caractères, sans caractère de contrôle.
+pub fn alias_valide(alias: &str) -> bool {
+    !alias.is_empty()
+        && alias.trim() == alias
+        && alias.chars().count() <= ALIAS_MAX
+        && !alias.chars().any(char::is_control)
+}
+
+/// Tilde développé, chemin relatif refusé, chemin résolu (`resoudre(_, false)`).
+pub fn resoudre_entree(p: &str, home: Option<&OsStr>) -> Result<PathBuf, String> {
+    let developpe =
+        developper_tilde(p, home).ok_or_else(|| format!("chemin invalide refusé : {p}"))?;
+    if !developpe.is_absolute() {
+        return Err(format!("chemin relatif refusé : {p}"));
+    }
+    resoudre(&developpe, false).map_err(|_| format!("chemin invalide refusé : {p}"))
 }
 
 /// Équivalent de `Path(p).expanduser()` : `~` et `~/…` passent par `HOME` (ou,
@@ -330,6 +372,7 @@ mod tests {
                 masquer_apres_min: 60.0,
                 rotation_s: 30.0,
                 projets_autorises: vec![projet.canonicalize().unwrap()],
+                alias: BTreeMap::new(),
             }
         );
     }
@@ -671,5 +714,122 @@ mod tests {
              # Refusé par défaut : seuls ces dossiers (chemins complets) affichent leur nom.\n\
              autorises = []\n"
         );
+    }
+
+    fn table(texte: &str) -> toml::Table {
+        texte.parse::<toml::Table>().unwrap()
+    }
+
+    #[test]
+    fn alias_lu_et_associe_au_chemin_resolu() {
+        let (_t, d) = dossier();
+        let p = d.join("p");
+        std::fs::create_dir(&p).unwrap();
+        let t = table(&format!(
+            "[projets]\nautorises = [\"{0}\"]\n[projets.alias]\n\"{0}\" = \"Joli\"\n",
+            p.display()
+        ));
+        let c = valider(&t, Some(d.as_os_str())).unwrap();
+        let attendu = BTreeMap::from([(p.canonicalize().unwrap(), "Joli".to_string())]);
+        assert_eq!(c.alias, attendu);
+    }
+
+    #[test]
+    fn alias_cle_ecrite_en_tilde() {
+        let (_t, d) = dossier();
+        let p = d.join("p");
+        std::fs::create_dir(&p).unwrap();
+        let t = table(&format!(
+            "[projets]\nautorises = [\"{}\"]\n[projets.alias]\n\"~/p\" = \"Joli\"\n",
+            p.display()
+        ));
+        let c = valider(&t, Some(d.as_os_str())).unwrap();
+        assert_eq!(
+            c.alias,
+            BTreeMap::from([(p.canonicalize().unwrap(), "Joli".to_string())])
+        );
+    }
+
+    #[test]
+    fn alias_pour_chemin_non_autorise_refuse_tout() {
+        let (_t, d) = dossier();
+        let p = d.join("p");
+        let q = d.join("q");
+        std::fs::create_dir(&p).unwrap();
+        std::fs::create_dir(&q).unwrap();
+        let t = table(&format!(
+            "[projets]\nautorises = [\"{}\"]\n[projets.alias]\n\"{}\" = \"Joli\"\n",
+            p.display(),
+            q.display()
+        ));
+        assert_eq!(
+            valider(&t, Some(d.as_os_str())),
+            Err("alias pour un chemin non autorisé".to_string())
+        );
+    }
+
+    #[test]
+    fn alias_hors_regles_refuse_tout() {
+        let (_t, d) = dossier();
+        let p = d.join("p");
+        std::fs::create_dir(&p).unwrap();
+        let valeurs = [
+            "\"\"".to_string(),
+            "\" X\"".to_string(),
+            "\"X \"".to_string(),
+            format!("\"{}\"", "a".repeat(33)),
+            "\"a\\nb\"".to_string(),
+            "\"a\\u0007b\"".to_string(),
+            "42".to_string(),
+        ];
+        for v in valeurs {
+            let t = table(&format!(
+                "[projets]\nautorises = [\"{0}\"]\n[projets.alias]\n\"{0}\" = {1}\n",
+                p.display(),
+                v
+            ));
+            assert_eq!(
+                valider(&t, Some(d.as_os_str())),
+                Err("alias invalide".to_string()),
+                "valeur {v}"
+            );
+        }
+    }
+
+    #[test]
+    fn alias_cle_relative_refuse_sans_citer_le_chemin() {
+        let (_t, d) = dossier();
+        let t = table("[projets.alias]\n\"relatif/secret\" = \"Joli\"\n");
+        assert_eq!(
+            valider(&t, Some(d.as_os_str())),
+            Err("alias pour un chemin non autorisé".to_string())
+        );
+    }
+
+    #[test]
+    fn alias_32_caracteres_accentues_accepte() {
+        let (_t, d) = dossier();
+        let p = d.join("p");
+        std::fs::create_dir(&p).unwrap();
+        let t = table(&format!(
+            "[projets]\nautorises = [\"{0}\"]\n[projets.alias]\n\"{0}\" = \"{1}\"\n",
+            p.display(),
+            "é".repeat(32)
+        ));
+        assert!(valider(&t, Some(d.as_os_str())).is_ok());
+    }
+
+    #[test]
+    fn alias_table_non_table_refuse_tout() {
+        let (_t, d) = dossier();
+        let t = table("[projets]\nalias = \"x\"\n");
+        assert!(valider(&t, Some(d.as_os_str())).is_err());
+    }
+
+    #[test]
+    fn config_sans_alias_a_une_table_vide() {
+        let (_t, d) = dossier();
+        let t = table("[projets]\nautorises = []\n");
+        assert!(valider(&t, Some(d.as_os_str())).unwrap().alias.is_empty());
     }
 }

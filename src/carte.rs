@@ -1,7 +1,7 @@
 //! Construction de la carte Discord. Fonctions pures, sauf la résolution des
 //! dossiers de projet, mise en cache. Voir la spec, section 5.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
@@ -143,6 +143,7 @@ fn nom_projet_avec(
     cache: &Cache,
     cwd: Option<&str>,
     autorises: &[PathBuf],
+    alias: &BTreeMap<PathBuf, String>,
     resolveur: impl FnOnce(&str) -> Option<PathBuf>,
 ) -> String {
     // Comparaison sur chemins complets résolus : un homonyme ou un dossier dont
@@ -155,6 +156,9 @@ fn nom_projet_avec(
     };
     for autorise in autorises {
         if chemin == *autorise || chemin.ancestors().skip(1).any(|a| a == autorise) {
+            if let Some(a) = alias.get(autorise) {
+                return a.clone();
+            }
             return autorise
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
@@ -164,8 +168,12 @@ fn nom_projet_avec(
     PROJET_PRIVE.to_string()
 }
 
-pub fn nom_projet(cwd: Option<&str>, autorises: &[PathBuf]) -> String {
-    nom_projet_avec(&CACHE_RESOLUTION, cwd, autorises, resoudre_cwd)
+pub fn nom_projet(
+    cwd: Option<&str>,
+    autorises: &[PathBuf],
+    alias: &BTreeMap<PathBuf, String>,
+) -> String {
+    nom_projet_avec(&CACHE_RESOLUTION, cwd, autorises, alias, resoudre_cwd)
 }
 
 pub fn tronquer(texte: &str) -> String {
@@ -231,7 +239,11 @@ pub fn construire_carte(
     let activite = activite_affichee(session, maintenant, config.inactif_apres_min * 60.0);
     let details = format!(
         "{activite} · {}",
-        nom_projet(session.cwd.as_deref(), &config.projets_autorises)
+        nom_projet(
+            session.cwd.as_deref(),
+            &config.projets_autorises,
+            &config.alias,
+        )
     );
     let state = if vue_b {
         let n = comptent.len();
@@ -347,7 +359,7 @@ mod tests {
         let p = t.path().join("MonProjet");
         std::fs::create_dir(&p).unwrap();
         let r = resolu(&p);
-        assert_eq!(nom_projet(p.to_str(), &[r]), "MonProjet");
+        assert_eq!(nom_projet(p.to_str(), &[r], &BTreeMap::new()), "MonProjet");
     }
 
     #[test]
@@ -356,7 +368,10 @@ mod tests {
         let p = t.path().join("MonProjet");
         let wt = p.join(".claude").join("worktrees").join("feature-x");
         std::fs::create_dir_all(&wt).unwrap();
-        assert_eq!(nom_projet(wt.to_str(), &[resolu(&p)]), "MonProjet");
+        assert_eq!(
+            nom_projet(wt.to_str(), &[resolu(&p)], &BTreeMap::new()),
+            "MonProjet"
+        );
     }
 
     #[test]
@@ -367,7 +382,7 @@ mod tests {
         std::fs::create_dir_all(&autorise).unwrap();
         std::fs::create_dir_all(&client).unwrap();
         assert_eq!(
-            nom_projet(client.to_str(), &[resolu(&autorise)]),
+            nom_projet(client.to_str(), &[resolu(&autorise)], &BTreeMap::new()),
             "Projet privé"
         );
     }
@@ -380,7 +395,7 @@ mod tests {
         std::fs::create_dir(&autorise).unwrap();
         std::fs::create_dir(&voisin).unwrap();
         assert_eq!(
-            nom_projet(voisin.to_str(), &[resolu(&autorise)]),
+            nom_projet(voisin.to_str(), &[resolu(&autorise)], &BTreeMap::new()),
             "Projet privé"
         );
     }
@@ -388,8 +403,14 @@ mod tests {
     #[test]
     fn test_nom_projet_liste_vide_ou_cwd_absent() {
         let t = tempfile::tempdir().unwrap();
-        assert_eq!(nom_projet(t.path().to_str(), &[]), "Projet privé");
-        assert_eq!(nom_projet(None, &[resolu(t.path())]), "Projet privé");
+        assert_eq!(
+            nom_projet(t.path().to_str(), &[], &BTreeMap::new()),
+            "Projet privé"
+        );
+        assert_eq!(
+            nom_projet(None, &[resolu(t.path())], &BTreeMap::new()),
+            "Projet privé"
+        );
     }
 
     #[test]
@@ -509,16 +530,54 @@ mod tests {
     }
 
     #[test]
+    fn nom_projet_affiche_l_alias() {
+        let t = tempfile::tempdir().unwrap();
+        let p = t.path().join("MonProjet");
+        let sous = p.join("src");
+        std::fs::create_dir_all(&sous).unwrap();
+        let r = resolu(&p);
+        let alias = BTreeMap::from([(r.clone(), "Joli".to_string())]);
+        assert_eq!(
+            nom_projet(p.to_str(), std::slice::from_ref(&r), &alias),
+            "Joli"
+        );
+        assert_eq!(
+            nom_projet(sous.to_str(), std::slice::from_ref(&r), &alias),
+            "Joli"
+        );
+    }
+
+    #[test]
+    fn alias_d_un_autre_projet_ignore() {
+        let t = tempfile::tempdir().unwrap();
+        let a = t.path().join("Premier");
+        let b = t.path().join("Second");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let alias = BTreeMap::from([(resolu(&b), "Joli".to_string())]);
+        assert_eq!(
+            nom_projet(a.to_str(), &[resolu(&a), resolu(&b)], &alias),
+            "Premier"
+        );
+    }
+
+    #[test]
     fn test_nom_projet_resolution_mise_en_cache() {
         let cache: Cache = Mutex::new(HashMap::new());
         let compteur = AtomicUsize::new(0);
         let p = PathBuf::from("/chemin/MonProjet");
         let autorises = [p.clone()];
         for _ in 0..2 {
-            let nom = nom_projet_avec(&cache, Some("/chemin/MonProjet"), &autorises, |c| {
-                compteur.fetch_add(1, Ordering::SeqCst);
-                Some(PathBuf::from(c))
-            });
+            let nom = nom_projet_avec(
+                &cache,
+                Some("/chemin/MonProjet"),
+                &autorises,
+                &BTreeMap::new(),
+                |c| {
+                    compteur.fetch_add(1, Ordering::SeqCst);
+                    Some(PathBuf::from(c))
+                },
+            );
             assert_eq!(nom, "MonProjet");
         }
         assert_eq!(compteur.load(Ordering::SeqCst), 1);
