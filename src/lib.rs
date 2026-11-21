@@ -6,6 +6,8 @@ pub mod chemins;
 pub mod cli;
 pub mod config;
 pub mod daemon;
+pub mod dialogues;
+pub mod edition;
 pub mod installation;
 pub mod journal;
 pub mod menu;
