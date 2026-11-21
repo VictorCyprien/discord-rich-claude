@@ -10,6 +10,8 @@ use crate::installation::{
     plist_chaine,
 };
 
+/// Nom de l'app, partout où elle se montre (Info.plist, tooltip, dialogues).
+pub const NOM_APP: &str = "Clauderune";
 pub const NOM_BUNDLE: &str = "Clauderune.app";
 /// Nom du bundle des versions précédentes, retiré à l'installation.
 pub const NOM_ANCIEN_BUNDLE: &str = "Discord Rich Claude.app";
@@ -20,11 +22,11 @@ const NOM_BINAIRE: &str = "discord-rich-claude";
 /// `Info.plist` du bundle : clés triées, au format de `plistlib.dumps`.
 pub fn info_plist(version: &str) -> Vec<u8> {
     let mut xml = String::from(ENTETE_PLIST);
-    xml += &plist_chaine("CFBundleDisplayName", "Clauderune");
+    xml += &plist_chaine("CFBundleDisplayName", NOM_APP);
     xml += &plist_chaine("CFBundleExecutable", NOM_BINAIRE);
     xml += &plist_chaine("CFBundleIconFile", "AppIcon");
     xml += &plist_chaine("CFBundleIdentifier", "local.discord-rich-claude");
-    xml += &plist_chaine("CFBundleName", "Clauderune");
+    xml += &plist_chaine("CFBundleName", NOM_APP);
     xml += &plist_chaine("CFBundlePackageType", "APPL");
     xml += &plist_chaine("CFBundleShortVersionString", version);
     xml += &plist_chaine("CFBundleVersion", version);

@@ -351,6 +351,7 @@ fn creer_interface(
     config: &Path,
     chemins: &CheminsProjets,
 ) -> Result<Interface, &'static str> {
+    use crate::bundle::NOM_APP;
     use tray_icon::TrayIconBuilder;
     use tray_icon::TrayIconEvent;
     use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -388,7 +389,7 @@ fn creer_interface(
         .with_menu(Box::new(menu))
         .with_icon(icone_tray(mode).ok_or("icône")?)
         .with_icon_as_template(true)
-        .with_tooltip("Clauderune")
+        .with_tooltip(NOM_APP)
         .build()
         .map_err(|_| "icône de barre de menus")?;
     Ok(Interface {

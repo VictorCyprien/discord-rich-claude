@@ -4,8 +4,9 @@
 use std::io;
 use std::path::PathBuf;
 
+use crate::bundle::NOM_APP;
+
 pub const OSASCRIPT: &str = "/usr/bin/osascript";
-pub const TITRE: &str = "Clauderune";
 pub const INVITE_AJOUT: &str = "Choisir le dossier du projet";
 pub const INVITE_CHANGEMENT: &str = "Choisir le nouveau dossier du projet";
 pub const QUESTION_NOM: &str = "Nom affiché sur Discord :";
@@ -19,8 +20,11 @@ pub struct Reponse {
 pub type Lanceur<'a> = &'a mut dyn FnMut(&[&str]) -> io::Result<Reponse>;
 
 pub fn lanceur_reel(commande: &[&str]) -> io::Result<Reponse> {
-    let sortie = std::process::Command::new(commande[0])
-        .args(&commande[1..])
+    let Some((programme, arguments)) = commande.split_first() else {
+        return Err(io::ErrorKind::InvalidInput.into());
+    };
+    let sortie = std::process::Command::new(programme)
+        .args(arguments)
         .output()?;
     Ok(Reponse {
         code: sortie.status.code().unwrap_or(-1),
@@ -76,15 +80,28 @@ pub fn choisir_dossier(lancer: Lanceur, invite: &str) -> Option<PathBuf> {
     (!sortie.is_empty()).then(|| PathBuf::from(sortie))
 }
 
+fn script_demander_nom() -> String {
+    format!(
+        "text returned of (display dialog (item 1 of argv) default answer (item 2 of argv) with title \"{NOM_APP}\" buttons {{\"Annuler\", \"OK\"}} default button \"OK\" cancel button \"Annuler\")"
+    )
+}
+
+fn script_confirmer_retrait() -> String {
+    format!(
+        "display dialog (item 1 of argv) with title \"{NOM_APP}\" buttons {{\"Annuler\", \"Retirer\"}} default button \"Annuler\" cancel button \"Annuler\""
+    )
+}
+
+fn script_alerter() -> String {
+    format!(
+        "display alert \"{NOM_APP}\" message (item 1 of argv) as warning buttons {{\"OK\"}} default button \"OK\""
+    )
+}
+
 pub fn demander_nom(lancer: Lanceur, defaut: &str) -> Option<String> {
     executer(
         lancer,
-        &[
-            "on run argv",
-            "activate",
-            "text returned of (display dialog (item 1 of argv) default answer (item 2 of argv) with title \"Clauderune\" buttons {\"Annuler\", \"OK\"} default button \"OK\" cancel button \"Annuler\")",
-            "end run",
-        ],
+        &["on run argv", "activate", &script_demander_nom(), "end run"],
         &[QUESTION_NOM, defaut],
     )
 }
@@ -96,7 +113,7 @@ pub fn confirmer_retrait(lancer: Lanceur, nom: &str) -> bool {
         &[
             "on run argv",
             "activate",
-            "display dialog (item 1 of argv) with title \"Clauderune\" buttons {\"Annuler\", \"Retirer\"} default button \"Annuler\" cancel button \"Annuler\"",
+            &script_confirmer_retrait(),
             "end run",
         ],
         &[&question],
@@ -107,12 +124,7 @@ pub fn confirmer_retrait(lancer: Lanceur, nom: &str) -> bool {
 pub fn alerter(lancer: Lanceur, message: &str) {
     executer(
         lancer,
-        &[
-            "on run argv",
-            "activate",
-            "display alert \"Clauderune\" message (item 1 of argv) as warning buttons {\"OK\"} default button \"OK\"",
-            "end run",
-        ],
+        &["on run argv", "activate", &script_alerter(), "end run"],
         &[message],
     );
 }
@@ -161,6 +173,27 @@ mod tests {
     }
 
     const PIEGE: &str = "x\" & (do shell script \"id\") & \"";
+
+    #[test]
+    fn chaque_script_a_titre_contient_nom_app() {
+        let (_, a) = avec_faux(0, "", |l| demander_nom(l, "x"));
+        let (_, b) = avec_faux(0, "", |l| confirmer_retrait(l, "x"));
+        let (_, c) = avec_faux(0, "", |l| alerter(l, "x"));
+        for appels in [a, b, c] {
+            assert!(
+                lignes_e(&appels[0]).iter().any(|l| l.contains(NOM_APP)),
+                "{:?}",
+                appels[0]
+            );
+        }
+        assert_eq!(NOM_APP, "Clauderune");
+    }
+
+    #[test]
+    fn lanceur_reel_commande_vide_est_refusee() {
+        let e = lanceur_reel(&[]).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::InvalidInput);
+    }
 
     #[test]
     fn commande_commence_par_osascript_absolu() {

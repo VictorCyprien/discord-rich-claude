@@ -443,6 +443,11 @@ autorises = [
     }
 
     #[test]
+    fn config_absente_rendue_a_l_octet_pres() {
+        assert_eq!(vide().rendre(), crate::config::CONFIG_PAR_DEFAUT);
+    }
+
+    #[test]
     fn rendre_sans_alias_omet_la_table() {
         let c = avec(&[("~/a", None)]);
         assert!(!c.rendre().contains("[projets.alias]"));
