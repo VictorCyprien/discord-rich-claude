@@ -874,3 +874,26 @@ fn install_refuse_si_l_app_tourne() {
     assert!(!chemins.applications.exists());
     assert!(!chemins.config.exists());
 }
+
+#[test]
+fn uninstall_retire_le_lien_meme_si_un_bundle_resiste() {
+    let _s = serie();
+    let (dossier, chemins) = chemins_temporaires();
+    let ancien_binaire = poser_ancienne_installation(&chemins);
+    // L'ancien bundle devient un lien : le retrait le refuse.
+    let ancien = chemins.applications.join("Discord Rich Claude.app");
+    fs::remove_dir_all(&ancien).unwrap();
+    let cible = dossier.path().join("cible-du-lien");
+    fs::create_dir_all(&cible).unwrap();
+    fs::write(cible.join("precieux"), "x").unwrap();
+    symlink(&cible, &ancien).unwrap();
+    assert_eq!(
+        fs::read_link(&chemins.lien_commande).unwrap(),
+        ancien_binaire
+    );
+    let r = desinstaller(&chemins, 501, |_| true);
+    assert_eq!(r.code, 1, "{}", r.sortie);
+    assert!(r.erreur.contains("Discord Rich Claude.app"), "{}", r.erreur);
+    assert!(fs::symlink_metadata(&chemins.lien_commande).is_err());
+    assert!(cible.join("precieux").exists());
+}

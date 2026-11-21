@@ -371,12 +371,11 @@ pub fn desinstaller_vers(
         );
         return 1;
     }
-    if let Err(e) = desinstaller_bundle(&chemins.applications) {
-        ecrire(
-            erreur,
-            &format!("  {:?} : {}", e.kind(), chemins.applications.display()),
-        );
-        return 1;
+    // Un bundle qui résiste est nommé, mais le lien de commande est retiré quand même.
+    let mut echec = false;
+    if let Err((bundle, e)) = desinstaller_bundle(&chemins.applications) {
+        ecrire(erreur, &format!("  {:?} : {}", e.kind(), bundle.display()));
+        echec = true;
     }
     match etat_lien(&chemins.lien_commande, &chemins.applications) {
         Ok(EtatLien::Absent) => {}
@@ -403,6 +402,9 @@ pub fn desinstaller_vers(
             );
             return 1;
         }
+    }
+    if echec {
+        return 1;
     }
     ecrire(
         sortie,

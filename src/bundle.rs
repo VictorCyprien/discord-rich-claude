@@ -1,5 +1,5 @@
 //! Bundle `.app` minimal, signé ad hoc, qui porte le binaire du daemon.
-//! Voir la spec, sections 8 et 14.4.
+//! Voir la spec, sections 8, 14.4 et 15.4.
 
 use std::fs;
 use std::io;
@@ -213,11 +213,16 @@ pub fn retirer_ancien_bundle(applications: &Path) -> io::Result<bool> {
     retirer_bundle(applications, NOM_ANCIEN_BUNDLE)
 }
 
-/// Retire le bundle courant et l'ancien. Les deux sont tentés ; la première erreur est rendue.
-pub fn desinstaller_bundle(applications: &Path) -> io::Result<()> {
-    let courant = retirer_bundle(applications, NOM_BUNDLE);
-    let ancien = retirer_bundle(applications, NOM_ANCIEN_BUNDLE);
-    courant.and(ancien).map(|_| ())
+/// Retire le bundle courant et l'ancien. Les deux sont tentés ; la première erreur est
+/// rendue avec le chemin du bundle fautif.
+pub fn desinstaller_bundle(applications: &Path) -> Result<(), (PathBuf, io::Error)> {
+    let mut premiere = None;
+    for nom in [NOM_BUNDLE, NOM_ANCIEN_BUNDLE] {
+        if let Err(e) = retirer_bundle(applications, nom) {
+            premiere.get_or_insert((applications.join(nom), e));
+        }
+    }
+    premiere.map_or(Ok(()), Err)
 }
 
 #[cfg(test)]
@@ -448,6 +453,19 @@ mod tests {
         std::os::unix::fs::symlink(&ailleurs, applications.join(NOM_ANCIEN_BUNDLE)).unwrap();
         assert!(retirer_ancien_bundle(&applications).is_err());
         assert!(ailleurs.join("precieux").exists());
+    }
+
+    #[test]
+    fn desinstaller_bundle_nomme_le_fautif_et_retire_l_autre() {
+        let d = tempfile::tempdir().unwrap();
+        let ailleurs = d.path().join("ailleurs");
+        fs::create_dir(&ailleurs).unwrap();
+        std::os::unix::fs::symlink(&ailleurs, d.path().join(NOM_BUNDLE)).unwrap();
+        fs::create_dir_all(d.path().join(NOM_ANCIEN_BUNDLE).join("Contents")).unwrap();
+        let (chemin, _) = desinstaller_bundle(d.path()).unwrap_err();
+        assert_eq!(chemin, d.path().join(NOM_BUNDLE));
+        assert!(!d.path().join(NOM_ANCIEN_BUNDLE).exists());
+        assert!(ailleurs.exists());
     }
 
     #[test]
