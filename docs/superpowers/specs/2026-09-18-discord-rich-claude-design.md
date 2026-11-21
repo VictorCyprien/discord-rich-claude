@@ -2,6 +2,10 @@
 
 Date : 2026-09-18 · Statut : validé en brainstorming, en attente de relecture
 
+Amendement du 2026-11-20 (section 14) : réécriture en Rust et widget de barre de menus. Là où une section 2 à 13 contredit la section 14, la section 14 l'emporte.
+
+Amendement du 2026-11-21 (section 15) : projets dans le menu, alias, Clauderune. Là où elle diverge des sections précédentes, la section 15 l'emporte.
+
 ## 1. Objectif
 
 Quand une session Claude Code tourne sur la machine, le profil Discord affiche une carte « Joue à ClaudeCode » avec l'activité en cours, le modèle, les tokens et la durée. Le nom du projet n'apparaît que pour les projets explicitement autorisés.
@@ -14,7 +18,7 @@ Usage personnel, macOS, Discord desktop installé.
 |---|---|---|
 | Réutiliser un projet existant | Non, on code le nôtre | 5 projets évalués (rar-file/claude-rpc, BrunoJurkovic/claude-code-discord-status, tsanva et Jerit3787/cc-discord-presence, StealthyLabsHQ/claude-rpc) : aucun n'a de liste blanche de projets. Le plus proche (rar-file) a une liste noire et envoie des statistiques à un serveur tiers par défaut. |
 | Architecture | Hooks Claude Code + daemon local | Un hook seul ne peut pas tenir la carte : Discord l'efface quand la connexion IPC se ferme. Les hooks donnent un état exact et immédiat. |
-| Langage | Python 3.13, uv, asyncio, pypresence | Stack maîtrisée, relisible. Go aurait un binaire unique et moins de RAM, gain négligeable en usage perso. |
+| Langage | Python 3.13, uv, asyncio, pypresence (remplacé par Rust, voir 14.1) | Stack maîtrisée, relisible. Go aurait un binaire unique et moins de RAM, gain négligeable en usage perso. |
 | Transport hook → daemon | `curl` sur socket Unix, hooks **synchrones** | Garantit l'ordre des événements (un `Stop` ne peut pas arriver avant le dernier `PreToolUse`). Coût attendu ~10 ms par événement, à mesurer en L1. |
 | Nom du projet | Liste blanche, refusé par défaut | Aucun nom de projet client ne peut sortir par erreur. |
 | Plusieurs sessions | La carte suit la session la plus récemment active, avec un compteur | |
@@ -209,7 +213,7 @@ Noms de fichiers, commandes, prompts, branche git, chemins. Un nom de projet uni
 | Panne | Comportement |
 |---|---|
 | Discord fermé ou redémarré | Tant qu'une session est vivante, nouvel essai toutes les 15 s ; la carte courante est envoyée dès la reconnexion |
-| Daemon arrêté | `curl` échoue sans bruit, Claude n'est pas gêné ; le LaunchAgent relance le daemon, l'état se reconstruit (4.1) |
+| Daemon arrêté | `curl` échoue sans bruit, Claude n'est pas gêné ; l'état se reconstruit (4.1) au prochain lancement. Depuis 14.4, le LaunchAgent n'a plus `KeepAlive` : un crash n'est pas relancé tout seul |
 | Ligne de transcript illisible | Ignorée ; notée dans le log si elle porte `usage` ou `model` (les autres lignes ne sont pas analysées) |
 | Erreur sur un événement | Notée dans le log, le daemon continue |
 | Config invalide | Refus par défaut (7.1) |
@@ -267,4 +271,138 @@ Si une hypothèse tombe, le design de la section concernée est revu avant L2.
 
 ## 13. Hors périmètre
 
-Windows et Linux, Claude Desktop, coût en dollars, branche git, boutons sur la carte, petites icônes par activité, statistiques historiques (semaine, total), commande pour gérer la liste blanche, distribution publique.
+Windows et Linux, Claude Desktop, coût en dollars, branche git, boutons sur la carte, petites icônes par activité, statistiques historiques (semaine, total), commande pour gérer la liste blanche (en ligne de commande ; le menu la gère depuis la section 15), distribution publique.
+
+Ajouts de la section 14 : Intel et binaire universel, notarisation, widget WidgetKit, commandes CLI `pause` / `resume`.
+
+## 14. Amendement du 2026-11-20 : Rust et widget de barre de menus
+
+### 14.1 Réécriture en Rust
+
+- Un seul binaire Rust, cible `aarch64-apple-darwin`. Raisons : démarrage et mémoire au repos plus faibles, taille de l'installation réduite, pas de Python ni de `uv` à l'exécution, et apprendre Rust.
+- Threads et canaux (`std` ou `crossbeam-channel`), sans tokio. Le fil principal appartient à la boucle d'événements de la barre de menus (macOS l'exige).
+- Discord : crate `discord-presence` 3.2 (threadée, reconnexion intégrée). Un spike le vérifie avant le portage : connexion, `set_activity`, `clear_activity`, reconnexion après redémarrage de Discord, intervalle de 15 s (hypothèse 6). Si le spike échoue : IPC écrit à la main.
+- Spike du 2026-11-20 : connexion, `Ready` et `set_activity` fonctionnent ; après avoir quitté puis relancé Discord, la crate émet `Disconnected` puis `Error`, sans reconnexion ni reprise de l'activité. Verdict : IPC écrit à la main, `discord-presence` retirée.
+- Comportement identique à Python : `config.toml` (mêmes clés), chemin du socket, routes `POST /event` et `GET /etat`, en-tête `X-Claude-Pid`, liste fermée de champs (7.3), libellés (section 5), commande de hook (section 8), journal.
+- Portage unité par unité avec `rust-anything` : la suite pytest et les cas enregistrés servent de référence, une unité n'est finie que si sa preuve passe. Le Python reste jusqu'à parité (tests d'intégration socket et `curl` repris en Rust), puis il est supprimé.
+- Les règles de `CLAUDE.md` valent pour le Rust : `sessions` et `carte` sans entrée-sortie, tests sans Discord réel, sans vrais chemins utilisateur, sans vrai `launchctl`.
+- Python supprimé le 2026-11-21.
+
+### 14.2 États
+
+Trois états, tenus en mémoire. Au lancement du daemon (login compris), l'état est toujours « Allumé » : aucun état n'est mémorisé sur disque.
+
+| État | Discord | Hooks reçus | Carte |
+|---|---|---|---|
+| Allumé | connecté quand une session compte (comportement 5 et 9) | suivis | affichée |
+| En pause | connexion gardée si déjà ouverte | suivis, les sessions restent à jour | effacée |
+| Arrêté | connexion fermée | répondus `204` et ignorés, rien gardé | aucune |
+
+- Reprise depuis « En pause » : la carte courante est renvoyée aussitôt (dans la limite de 15 s de 5).
+- Reprise depuis « Arrêté » : l'état se reconstruit au fil de l'eau (4.1).
+- `GET /etat` renvoie aussi `"etat": "allume" | "pause" | "arrete"`, et `status` l'affiche.
+
+### 14.3 Barre de menus
+
+- Bibliothèques : `tray-icon`, `tao`, `muda`.
+- Menu : une ligne d'état grisée (« Allumé », « En pause », « Arrêté »), puis « Allumer », « Mettre en pause », « Arrêter », un séparateur, « Quitter ». « Quitter » ferme le daemon ; il ne le relance pas.
+- Icône : trois variantes (une par état), monochromes en mode « template » pour suivre le thème clair ou sombre.
+- Confidentialité : le menu n'affiche aucun nom de projet, de session ni de chemin (remplacée par 15.2).
+
+### 14.4 Installation et démarrage
+
+- `install` crée `~/Applications/Discord Rich Claude.app` : un bundle minimal avec `Info.plist` (`LSUIElement` à vrai, pas d'icône dans le Dock) et le binaire. Signature ad hoc (`codesign -s -`), sans notarisation.
+- Le LaunchAgent lance le binaire du bundle, avec `RunAtLoad` et sans `KeepAlive`, pour que « Quitter » ne le relance pas.
+- `install` pose aussi le lien `~/.local/bin/discord-rich-claude` vers le binaire du bundle. Il refuse, sans rien modifier, si une autre entrée occupe ce chemin (par exemple le lien de la version Python posé par `uv tool`). `uninstall` retire ce lien seulement s'il pointe vers le binaire du bundle.
+- `uninstall` retire nos hooks, le LaunchAgent et le bundle ; il garde la config. Le « o » explicite sur `settings.json`, le refus de tourner en root, les sauvegardes et les droits de 8 ne changent pas.
+- CLI : `run`, `install`, `uninstall`, `status`. Ouvrir l'app (aucun argument) équivaut à `run` ; c'est la façon de relancer après Quitter. Pas de `pause` ni `resume` en ligne de commande : seul le menu change l'état.
+
+## 15. Amendement du 2026-11-21 : projets dans le menu, Clauderune
+
+Là où elle diverge des sections précédentes, cette section fait foi.
+
+### 15.1 Alias
+
+Un projet de la liste blanche peut porter un alias, affiché sur Discord à la place du nom de son dossier :
+
+```toml
+[projets]
+autorises = [
+  "~/Workspace/Perso/discord-rich-claude",
+]
+
+[projets.alias]
+"~/Workspace/Perso/discord-rich-claude" = "DiscordRichClaude"
+```
+
+- Clé : un chemin de `autorises`, comparé après résolution, comme en 7.2. Une clé qui ne désigne aucun chemin autorisé rend la config invalide.
+- Nom affiché (remplace la dernière puce de 7.2) : l'alias du chemin autorisé s'il en a un, sinon le dernier élément de ce chemin. Vaut aussi pour un sous-dossier ou un worktree.
+- Règles : un texte, sans espaces au début ni à la fin, de 1 à 32 caractères (comptés en caractères, pas en octets), sans caractère de contrôle. Un alias hors règles rend la config invalide (7.1 : rien d'affiché). Retomber sur le nom du dossier montrerait le nom que l'alias devait cacher.
+- Depuis le menu, un alias vide ou égal au nom du dossier n'est pas écrit : le projet n'a plus d'alias.
+- Deux projets peuvent porter le même alias.
+- Le journal ne cite ni la clé ni l'alias d'une erreur d'alias.
+
+### 15.2 Menu « Projets »
+
+Remplace la dernière puce de 14.3 : le menu montre les projets de la liste blanche (nom affiché et chemin), jamais de session ni de projet hors de la liste.
+
+```
+Allumé
+Allumer
+Mettre en pause
+Arrêter
+──────────
+Projets ▸   AURA ▸
+            DiscordRichClaude ▸   ~/Workspace/Perso/discord-rich-claude   (grisé)
+            ──────────            ──────────
+            Ajouter un projet…    Renommer…
+                                  Changer le dossier…
+                                  Retirer…
+──────────
+Quitter
+```
+
+- Projets triés par nom affiché, sans tenir compte de la casse. Liste vide : une ligne grisée « Aucun projet », puis « Ajouter un projet… ». Config invalide ou en lien symbolique : une ligne grisée « config.toml invalide », puis « Ajouter un projet… » (qui affichera l'erreur).
+- Chemin affiché sous la forme `~/…` quand il est sous le dossier personnel.
+- Le menu « Projets » est disponible dans les trois états.
+- Il se reconstruit après une modification faite par le menu, et quand le daemon recharge une config modifiée à la main (boucle de contrôle, 4.4).
+
+Actions et libellés, codés en dur. Titre de tous les dialogues : « Clauderune ».
+
+- « Ajouter un projet… » : sélecteur de dossier « Choisir le dossier du projet ». Puis champ « Nom affiché sur Discord : », prérempli avec le nom du dossier, boutons « Annuler » et « OK ».
+- « Renommer… » : même champ, prérempli avec le nom affiché.
+- « Changer le dossier… » : sélecteur « Choisir le nouveau dossier du projet ». L'alias est gardé.
+- « Retirer… » : « Retirer « <nom affiché> » des projets affichés ? », boutons « Annuler » et « Retirer ». L'alias part avec le projet.
+- « Annuler » ne change rien.
+- Erreurs, dans une alerte avec un bouton « OK » :
+  - « Ce dossier est déjà dans la liste. » (ajout, ou changement vers un dossier déjà autorisé ; comparaison sur chemins résolus) ;
+  - « Nom invalide : 1 à 32 caractères, sans caractère de contrôle. » ;
+  - « config.toml est invalide : corrige-la avant de modifier les projets. » ;
+  - « config.toml est un lien symbolique : modifie-la à la main. » ;
+  - « Choisis un dossier de projet, pas la racine ni le dossier personnel. » (ajout ou changement vers `/` ou le dossier personnel) ;
+  - « Impossible d'écrire config.toml (voir le journal). ».
+- Dialogues : `/usr/bin/osascript` (chemin absolu), lancé sur un fil à part pour que le menu reste réactif. Les textes (libellés, nom prérempli) passent en arguments (`on run argv`), jamais collés dans le source AppleScript. Une seule édition à la fois : un clic pendant une édition en cours est ignoré. Un échec d'`osascript` vaut une annulation ; il est journalisé (genre d'erreur ou code de sortie, jamais de texte). L'action vise le projet sous le curseur au moment du clic.
+- Journal : « projets modifiés depuis le menu », sans chemin ni alias.
+
+### 15.3 Écriture de `config.toml`
+
+- Le menu écrit `config.toml` ; `install` le crée toujours s'il est absent (8).
+- Avant d'écrire, le fichier est relu et validé (7.1, 15.1). Absent : on part de la config par défaut. Invalide ou lien symbolique : refus, aucune écriture, alerte d'erreur.
+- Réécriture complète depuis le modèle commenté : `client_id`, `inactif_apres_min`, `masquer_apres_min`, `rotation_s`, `[projets] autorises`, `[projets.alias]` (table omise si vide). Les valeurs gardent leur forme écrite (chemins en `~/…`, entiers ou décimaux). Une valeur absente est écrite avec sa valeur par défaut. Les commentaires personnels et les clés inconnues sont perdus.
+- Un dossier ajouté par le menu s'écrit en `~/…` s'il est sous le dossier personnel, sinon en chemin absolu.
+- Avant d'écrire, le texte rendu est relu et validé ; s'il ne redonne pas la même liste blanche et les mêmes alias, rien n'est écrit (« Impossible d'écrire config.toml (voir le journal). »).
+- Écriture atomique : fichier temporaire dans le même dossier, en 0600, puis `rename`. Le fichier final est en 0600.
+- Après l'écriture, le daemon recharge la config tout de suite, sans attendre la boucle de contrôle.
+
+### 15.4 Clauderune
+
+- Nom d'affichage de l'app : « Clauderune ». `install` crée `~/Applications/Clauderune.app`, avec `CFBundleName` et `CFBundleDisplayName` à « Clauderune ». Le tooltip de l'icône de barre de menus dit « Clauderune ».
+- Inchangés : le binaire `discord-rich-claude`, `CFBundleIdentifier` et label du LaunchAgent `local.discord-rich-claude`, `~/.config/discord-rich-claude`, le journal, le socket, la commande de hook, le lien `~/.local/bin/discord-rich-claude`.
+- Migration : `install` retire `~/Applications/Discord Rich Claude.app` s'il existe (jamais à travers un lien symbolique). Un lien `~/.local/bin/discord-rich-claude` qui pointe vers le binaire de l'ancien bundle compte comme le nôtre : il est remplacé, pas refusé. `uninstall` retire les deux bundles et un lien vers l'un ou l'autre.
+- L'ancien bundle est retiré en dernier, après le LaunchAgent et le lien ; un échec de ce retrait laisse l'app en place, l'installation réussit quand même.
+- `install` refuse, sans rien modifier, si l'app tourne (le socket répond) : « l'app tourne : choisis « Quitter » dans son menu, puis relance install ».
+- `uninstall` retire le lien même si un bundle résiste, et nomme le bundle fautif.
+- Icône d'app : pixel art original (bulle de chat blurple, astérisque terracotta, fond marine), sans élément repris d'un jeu. Source `assets/clauderune.png` (128 × 128), généré avec PixelLab. `assets/AppIcon.icns` en est tiré (`iconutil`, agrandi au plus proche voisin) et embarqué dans le binaire. `install` l'écrit dans `Contents/Resources/AppIcon.icns`, `CFBundleIconFile` vaut `AppIcon`.
+- Icône de barre de menus : le même motif en monochrome (template), dessiné à la main sur une grille de 18 × 18 pixels logiques, rendue en 36 × 36. Trois variantes : Allumé, bulle pleine avec l'astérisque en creux ; En pause, contour de bulle et deux barres ; Arrêté, contour de bulle seul.
+- Côté Discord, rien ne change : le nom de l'application dans le Developer Portal et l'image `logo` restent.
+- Aucune crate ajoutée.
