@@ -56,7 +56,7 @@ Les tokens comptés excluent les lectures du cache. Discord limite la mise à jo
 ## Confidentialité
 
 - Refus par défaut : un projet absent de `projets.autorises` s'affiche « Projet privé ». La comparaison porte sur le chemin complet.
-- Jamais affiché : noms de fichiers, commandes, prompts, branche git, chemins.
+- Jamais affiché sur Discord : noms de fichiers, commandes, prompts, branche git, chemins.
 - Le daemon ne garde qu'une liste fermée de champs de chaque hook : `session_id`, `cwd`, `hook_event_name`, `tool_name`, `agent_id`, `transcript_path`, et l'en-tête `X-Claude-Pid`. Le reste (texte des prompts, `tool_input`, `last_assistant_message`…) est jeté à la réception et jamais écrit dans le log.
 
 ## Barre de menus
@@ -69,7 +69,7 @@ Le daemon vit dans la barre de menus macOS : une icône, sans présence dans le 
 | En pause | Les hooks sont suivis et les sessions restent à jour, mais la carte est effacée. La connexion à Discord est gardée si elle est déjà ouverte. Au retour à « Allumé », la carte courante est renvoyée aussitôt (dans la limite de 15 s). |
 | Arrêté | La connexion à Discord est fermée, les hooks sont répondus `204` et ignorés, rien n'est gardé. Au retour à « Allumé », l'état se reconstruit au fil de l'eau. |
 
-Le menu compte une ligne d'état grisée (« Allumé », « En pause » ou « Arrêté »), puis « Allumer », « Mettre en pause », « Arrêter », un séparateur et « Quitter ». Il compte aussi un sous-menu « Projets » (voir plus bas). Il n'affiche jamais de session ni de projet hors de la liste blanche.
+Le menu compte une ligne d'état grisée (« Allumé », « En pause » ou « Arrêté »), puis « Allumer », « Mettre en pause », « Arrêter », un séparateur et « Quitter ». Le sous-menu « Projets » (voir plus bas) se place après « Arrêter », entre deux séparateurs, avant « Quitter ». Il n'affiche jamais de session ni de projet hors de la liste blanche.
 
 - L'état est toujours « Allumé » au lancement, donc à l'ouverture de session : aucun état n'est mémorisé sur disque.
 - « Quitter » ferme le daemon et ne relance rien. Pour le relancer, ouvre l'app « Clauderune » (Spotlight, Launchpad) : sans argument, le binaire fait `run`.
@@ -77,7 +77,7 @@ Le menu compte une ligne d'état grisée (« Allumé », « En pause » ou « Ar
 
 ## Projets
 
-Le sous-menu « Projets » montre les projets de la liste blanche, triés par nom affiché. Chaque projet a un sous-menu : son chemin (grisé), « Renommer… », « Changer le dossier… » et « Retirer… ». « Ajouter un projet… » choisit un dossier puis demande le nom à afficher sur Discord. Les dialogues passent par `osascript`. Le menu réécrit `config.toml` (0600, de façon atomique) ; il refuse si le fichier est invalide ou est un lien symbolique.
+Le sous-menu « Projets » montre les projets de la liste blanche, triés par nom affiché. Chaque projet a un sous-menu : son chemin (grisé), « Renommer… », « Changer le dossier… » et « Retirer… ». « Ajouter un projet… » choisit un dossier puis demande le nom à afficher sur Discord. Les dialogues passent par `osascript`. Le menu réécrit `config.toml` (0600, de façon atomique) ; il refuse si le fichier est invalide ou est un lien symbolique, et refuse `/` ou le dossier personnel comme projet. Attention : la réécriture par le menu efface les commentaires personnels et les clés inconnues de `config.toml` (copie-le avant si tu y tiens).
 
 Un projet peut porter un alias, affiché sur Discord à la place du nom de son dossier, y compris pour ses sous-dossiers et ses worktrees :
 
@@ -93,7 +93,7 @@ La clé doit désigner un chemin de `autorises` (comparé après résolution) ; 
 
 ## Migration
 
-Avant Clauderune, l'app s'appelait `Discord Rich Claude.app`. `install` la retire en dernier, après avoir chargé le LaunchAgent et posé le lien (`ancienne app retirée : …`) et met à jour le lien `~/.local/bin/discord-rich-claude` s'il visait l'ancien binaire. Si l'ancienne app ne peut pas être retirée, `install` le signale (`ancienne app laissée en place : …`) et continue.
+Avant Clauderune, l'app s'appelait `Discord Rich Claude.app`. Choisis « Quitter » dans le menu de l'app avant `install`, qui refuse si l'app tourne. `install` retire l'ancienne app en dernier, après avoir chargé le LaunchAgent et posé le lien (`ancienne app retirée : …`) et met à jour le lien `~/.local/bin/discord-rich-claude` s'il visait l'ancien binaire. Si l'ancienne app ne peut pas être retirée, `install` le signale (`ancienne app laissée en place : …`) et continue.
 
 ## Commandes
 
@@ -108,12 +108,14 @@ Il n'y a ni `pause` ni `resume` en ligne de commande : seul le menu change l'ét
 
 ## Mise à jour
 
+Choisis d'abord « Quitter » dans le menu de l'app : `install` refuse si l'app tourne.
+
 ```bash
 cargo build --release
 ./target/release/discord-rich-claude install
 ```
 
-`install` remplace le binaire du bundle, puis décharge et recharge le LaunchAgent : le daemon repart aussitôt avec la nouvelle version.
+`install` remplace le binaire du bundle, puis décharge et recharge le LaunchAgent : le daemon repart alors avec la nouvelle version.
 
 ## Désinstallation
 

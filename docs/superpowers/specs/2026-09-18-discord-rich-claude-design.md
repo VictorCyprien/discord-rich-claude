@@ -4,6 +4,8 @@ Date : 2026-09-18 · Statut : validé en brainstorming, en attente de relecture
 
 Amendement du 2026-11-20 (section 14) : réécriture en Rust et widget de barre de menus. Là où une section 2 à 13 contredit la section 14, la section 14 l'emporte.
 
+Amendement du 2026-11-21 (section 15) : projets dans le menu, alias, Clauderune. Là où elle diverge des sections précédentes, la section 15 l'emporte.
+
 ## 1. Objectif
 
 Quand une session Claude Code tourne sur la machine, le profil Discord affiche une carte « Joue à ClaudeCode » avec l'activité en cours, le modèle, les tokens et la durée. Le nom du projet n'apparaît que pour les projets explicitement autorisés.
@@ -269,7 +271,7 @@ Si une hypothèse tombe, le design de la section concernée est revu avant L2.
 
 ## 13. Hors périmètre
 
-Windows et Linux, Claude Desktop, coût en dollars, branche git, boutons sur la carte, petites icônes par activité, statistiques historiques (semaine, total), commande pour gérer la liste blanche, distribution publique.
+Windows et Linux, Claude Desktop, coût en dollars, branche git, boutons sur la carte, petites icônes par activité, statistiques historiques (semaine, total), commande pour gérer la liste blanche (en ligne de commande ; le menu la gère depuis la section 15), distribution publique.
 
 Ajouts de la section 14 : Intel et binaire universel, notarisation, widget WidgetKit, commandes CLI `pause` / `resume`.
 
@@ -305,7 +307,7 @@ Trois états, tenus en mémoire. Au lancement du daemon (login compris), l'état
 - Bibliothèques : `tray-icon`, `tao`, `muda`.
 - Menu : une ligne d'état grisée (« Allumé », « En pause », « Arrêté »), puis « Allumer », « Mettre en pause », « Arrêter », un séparateur, « Quitter ». « Quitter » ferme le daemon ; il ne le relance pas.
 - Icône : trois variantes (une par état), monochromes en mode « template » pour suivre le thème clair ou sombre.
-- Confidentialité : le menu n'affiche aucun nom de projet, de session ni de chemin.
+- Confidentialité : le menu n'affiche aucun nom de projet, de session ni de chemin (remplacée par 15.2).
 
 ### 14.4 Installation et démarrage
 
@@ -338,6 +340,7 @@ autorises = [
 - Règles : un texte, sans espaces au début ni à la fin, de 1 à 32 caractères (comptés en caractères, pas en octets), sans caractère de contrôle. Un alias hors règles rend la config invalide (7.1 : rien d'affiché). Retomber sur le nom du dossier montrerait le nom que l'alias devait cacher.
 - Depuis le menu, un alias vide ou égal au nom du dossier n'est pas écrit : le projet n'a plus d'alias.
 - Deux projets peuvent porter le même alias.
+- Le journal ne cite ni la clé ni l'alias d'une erreur d'alias.
 
 ### 15.2 Menu « Projets »
 
@@ -345,7 +348,6 @@ Remplace la dernière puce de 14.3 : le menu montre les projets de la liste blan
 
 ```
 Allumé
-──────────
 Allumer
 Mettre en pause
 Arrêter
@@ -361,7 +363,7 @@ Quitter
 ```
 
 - Projets triés par nom affiché, sans tenir compte de la casse. Liste vide : une ligne grisée « Aucun projet », puis « Ajouter un projet… ». Config invalide ou en lien symbolique : une ligne grisée « config.toml invalide », puis « Ajouter un projet… » (qui affichera l'erreur).
-- Chemin affiché sous la forme `~/…` quand il est sous le dossier personnel, tel qu'écrit dans la config.
+- Chemin affiché sous la forme `~/…` quand il est sous le dossier personnel.
 - Le menu « Projets » est disponible dans les trois états.
 - Il se reconstruit après une modification faite par le menu, et quand le daemon recharge une config modifiée à la main (boucle de contrôle, 4.4).
 
@@ -377,8 +379,9 @@ Actions et libellés, codés en dur. Titre de tous les dialogues : « Clauderune
   - « Nom invalide : 1 à 32 caractères, sans caractère de contrôle. » ;
   - « config.toml est invalide : corrige-la avant de modifier les projets. » ;
   - « config.toml est un lien symbolique : modifie-la à la main. » ;
+  - « Choisis un dossier de projet, pas la racine ni le dossier personnel. » (ajout ou changement vers `/` ou le dossier personnel) ;
   - « Impossible d'écrire config.toml (voir le journal). ».
-- Dialogues : `/usr/bin/osascript` (chemin absolu), lancé sur un fil à part pour que le menu reste réactif. Les textes (libellés, nom prérempli) passent en arguments (`on run argv`), jamais collés dans le source AppleScript. Une seule édition à la fois : un clic pendant une édition en cours est ignoré.
+- Dialogues : `/usr/bin/osascript` (chemin absolu), lancé sur un fil à part pour que le menu reste réactif. Les textes (libellés, nom prérempli) passent en arguments (`on run argv`), jamais collés dans le source AppleScript. Une seule édition à la fois : un clic pendant une édition en cours est ignoré. Un échec d'`osascript` vaut une annulation ; il est journalisé (genre d'erreur ou code de sortie, jamais de texte). L'action vise le projet sous le curseur au moment du clic.
 - Journal : « projets modifiés depuis le menu », sans chemin ni alias.
 
 ### 15.3 Écriture de `config.toml`
@@ -387,6 +390,7 @@ Actions et libellés, codés en dur. Titre de tous les dialogues : « Clauderune
 - Avant d'écrire, le fichier est relu et validé (7.1, 15.1). Absent : on part de la config par défaut. Invalide ou lien symbolique : refus, aucune écriture, alerte d'erreur.
 - Réécriture complète depuis le modèle commenté : `client_id`, `inactif_apres_min`, `masquer_apres_min`, `rotation_s`, `[projets] autorises`, `[projets.alias]` (table omise si vide). Les valeurs gardent leur forme écrite (chemins en `~/…`, entiers ou décimaux). Une valeur absente est écrite avec sa valeur par défaut. Les commentaires personnels et les clés inconnues sont perdus.
 - Un dossier ajouté par le menu s'écrit en `~/…` s'il est sous le dossier personnel, sinon en chemin absolu.
+- Avant d'écrire, le texte rendu est relu et validé ; s'il ne redonne pas la même liste blanche et les mêmes alias, rien n'est écrit (« Impossible d'écrire config.toml (voir le journal). »).
 - Écriture atomique : fichier temporaire dans le même dossier, en 0600, puis `rename`. Le fichier final est en 0600.
 - Après l'écriture, le daemon recharge la config tout de suite, sans attendre la boucle de contrôle.
 
@@ -395,6 +399,9 @@ Actions et libellés, codés en dur. Titre de tous les dialogues : « Clauderune
 - Nom d'affichage de l'app : « Clauderune ». `install` crée `~/Applications/Clauderune.app`, avec `CFBundleName` et `CFBundleDisplayName` à « Clauderune ». Le tooltip de l'icône de barre de menus dit « Clauderune ».
 - Inchangés : le binaire `discord-rich-claude`, `CFBundleIdentifier` et label du LaunchAgent `local.discord-rich-claude`, `~/.config/discord-rich-claude`, le journal, le socket, la commande de hook, le lien `~/.local/bin/discord-rich-claude`.
 - Migration : `install` retire `~/Applications/Discord Rich Claude.app` s'il existe (jamais à travers un lien symbolique). Un lien `~/.local/bin/discord-rich-claude` qui pointe vers le binaire de l'ancien bundle compte comme le nôtre : il est remplacé, pas refusé. `uninstall` retire les deux bundles et un lien vers l'un ou l'autre.
+- L'ancien bundle est retiré en dernier, après le LaunchAgent et le lien ; un échec de ce retrait laisse l'app en place, l'installation réussit quand même.
+- `install` refuse, sans rien modifier, si l'app tourne (le socket répond) : « l'app tourne : choisis « Quitter » dans son menu, puis relance install ».
+- `uninstall` retire le lien même si un bundle résiste, et nomme le bundle fautif.
 - Icône d'app : pixel art original (bulle de chat blurple, astérisque terracotta, fond marine), sans élément repris d'un jeu. Source `assets/clauderune.png` (128 × 128), généré avec PixelLab. `assets/AppIcon.icns` en est tiré (`iconutil`, agrandi au plus proche voisin) et embarqué dans le binaire. `install` l'écrit dans `Contents/Resources/AppIcon.icns`, `CFBundleIconFile` vaut `AppIcon`.
 - Icône de barre de menus : le même motif en monochrome (template), dessiné à la main sur une grille de 18 × 18 pixels logiques, rendue en 36 × 36. Trois variantes : Allumé, bulle pleine avec l'astérisque en creux ; En pause, contour de bulle et deux barres ; Arrêté, contour de bulle seul.
 - Côté Discord, rien ne change : le nom de l'application dans le Developer Portal et l'image `logo` restent.

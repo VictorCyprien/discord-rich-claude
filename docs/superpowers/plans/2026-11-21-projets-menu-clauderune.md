@@ -1,5 +1,7 @@
 # Projets dans le menu et Clauderune — plan d'implémentation
 
+Écarts à l'exécution : voir la spec 15 (mise à jour) ; le code fait foi sur l'ordre de migration, l'index résolu au clic et l'installation du rappel.
+
 > **Pour les agents :** sous-skill requise : superpowers:subagent-driven-development (recommandée) ou superpowers:executing-plans, tâche par tâche. Les étapes utilisent des cases à cocher (`- [ ]`).
 
 **But :** éditer la liste blanche (ajouter, renommer par alias, changer le dossier, retirer) depuis la barre de menus, et présenter l'app sous le nom « Clauderune » avec une icône en pixel art.

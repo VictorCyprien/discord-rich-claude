@@ -1,4 +1,4 @@
-//! Barre de menus macOS (tray-icon + tao). Voir la spec, sections 8 et 14.2.
+//! Barre de menus macOS (tray-icon + tao). Voir la spec, sections 8, 14.2 et 15.2.
 //!
 //! La logique pure (entrées, icônes) est testée ; la boucle d'interface, elle, est validée à
 //! la main.

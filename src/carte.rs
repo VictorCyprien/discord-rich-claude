@@ -1,5 +1,5 @@
 //! Construction de la carte Discord. Fonctions pures, sauf la résolution des
-//! dossiers de projet, mise en cache. Voir la spec, section 5.
+//! dossiers de projet, mise en cache. Voir la spec, sections 5 et 15.1.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
