@@ -10,6 +10,7 @@ pub mod installation;
 pub mod journal;
 pub mod menu;
 pub mod presence;
+pub mod projets;
 pub mod serveur;
 pub mod sessions;
 pub mod tokens;
