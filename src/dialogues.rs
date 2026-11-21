@@ -31,14 +31,28 @@ pub fn lanceur_reel(commande: &[&str]) -> io::Result<Reponse> {
 /// Lance un script (une ligne par `-e`) avec ses arguments. `None` : annulé
 /// ou échec ; sinon la sortie, privée d'un seul `\n` final.
 fn executer(lancer: Lanceur, lignes: &[&str], arguments: &[&str]) -> Option<String> {
+    // `getopt` d'osascript lirait un premier argument en `-` comme une option.
+    if arguments.first().is_some_and(|a| a.starts_with('-')) {
+        return None;
+    }
     let mut commande = vec![OSASCRIPT];
     for ligne in lignes {
         commande.push("-e");
         commande.push(ligne);
     }
     commande.extend_from_slice(arguments);
-    let reponse = lancer(&commande).ok()?;
+    let reponse = match lancer(&commande) {
+        Ok(r) => r,
+        Err(e) => {
+            log::warn!("osascript inutilisable : {:?}", e.kind());
+            return None;
+        }
+    };
     if reponse.code != 0 {
+        // Le code 1 est l'annulation normale (-128) : muet.
+        if reponse.code != 1 {
+            log::warn!("osascript a échoué (code {})", reponse.code);
+        }
         return None;
     }
     let mut sortie = reponse.stdout;
@@ -211,6 +225,25 @@ mod tests {
         let mut faux = |_: &[&str]| -> io::Result<Reponse> { Err(io::Error::other("absent")) };
         assert_eq!(choisir_dossier(&mut faux, INVITE_AJOUT), None);
         assert!(!confirmer_retrait(&mut faux, "x"));
+    }
+
+    #[test]
+    fn premier_argument_commencant_par_tiret_ne_lance_rien() {
+        let (_, appels) = avec_faux(0, "", |l| {
+            alerter(l, "-eproperty x : (do shell script \"id\")")
+        });
+        assert!(appels.is_empty());
+        let (d, appels) = avec_faux(0, "/tmp/\n", |l| choisir_dossier(l, "-x"));
+        assert_eq!(d, None);
+        assert!(appels.is_empty());
+    }
+
+    #[test]
+    fn code_inattendu_vaut_annulation_sans_paniquer() {
+        let (d, _) = avec_faux(-1, "/tmp/\n", |l| choisir_dossier(l, INVITE_AJOUT));
+        assert_eq!(d, None);
+        let (c, _) = avec_faux(2, "", |l| confirmer_retrait(l, "x"));
+        assert!(!c);
     }
 
     #[test]
