@@ -33,29 +33,26 @@ fn premier_instant<Tz: TimeZone>(r: chrono::LocalResult<chrono::DateTime<Tz>>) -
     }
 }
 
-/// Valeur de `minuit_local` pour un fuseau donné, ou le nom de l'exception Python
-/// que `datetime.fromtimestamp` lèverait.
+/// Valeur de `minuit_local` pour un fuseau donné, ou `None` là où
+/// `datetime.fromtimestamp` lèverait une exception en Python.
 ///
 /// Minuit est pris dans le fuseau en vigueur à minuit lui-même, pas dans celui de
 /// `maintenant` (les deux diffèrent un jour de changement d'heure).
-pub fn minuit_selon<Tz: TimeZone>(fuseau: &Tz, maintenant: f64) -> Result<f64, &'static str> {
+pub fn minuit_selon<Tz: TimeZone>(fuseau: &Tz, maintenant: f64) -> Option<f64> {
     if maintenant.is_nan() {
-        return Err("ValueError");
+        return None;
     }
     // 2^63 : au-delà, `time_t` déborde.
     if !maintenant.is_finite() || maintenant.abs() >= 9_223_372_036_854_775_808.0 {
-        return Err("OverflowError");
+        return None;
     }
     let secondes = maintenant.floor() as i64;
-    let maintenant_local = fuseau
-        .timestamp_opt(secondes, 0)
-        .single()
-        .ok_or("ValueError")?;
+    let maintenant_local = fuseau.timestamp_opt(secondes, 0).single()?;
     let jour = maintenant_local.date_naive();
     if !(1..=9999).contains(&chrono::Datelike::year(&jour)) {
-        return Err("ValueError");
+        return None;
     }
-    let minuit = jour.and_hms_opt(0, 0, 0).ok_or("ValueError")?;
+    let minuit = jour.and_hms_opt(0, 0, 0)?;
     let instant = match premier_instant(fuseau.from_local_datetime(&minuit)) {
         Some(t) => t,
         None => {
@@ -64,16 +61,11 @@ pub fn minuit_selon<Tz: TimeZone>(fuseau: &Tz, maintenant: f64) -> Result<f64, &
             minuit.and_utc().timestamp() - i64::from(avant.fix().local_minus_utc())
         }
     };
-    Ok(instant as f64)
-}
-
-/// Comme `minuit_local`, mais rend le nom de l'exception Python là où elle lève.
-pub fn minuit_local_strict(maintenant: f64) -> Result<f64, &'static str> {
-    minuit_selon(&Local, maintenant)
+    Some(instant as f64)
 }
 
 pub fn minuit_local(maintenant: f64) -> f64 {
-    minuit_local_strict(maintenant).unwrap_or(0.0)
+    minuit_selon(&Local, maintenant).unwrap_or(0.0)
 }
 
 fn finit_par_jsonl(nom: &std::ffi::OsStr) -> bool {
@@ -283,65 +275,43 @@ fn compteur(v: Option<&Value>) -> Option<i64> {
 
 pub type Extrait = (Cle, Option<f64>, [i64; 3]);
 
-/// Comme `extraire`, mais rend `Err("AttributeError")` quand `obj` n'est pas un
-/// objet JSON (Python appelle `.get` dessus).
-pub fn extraire_strict(obj: &Value) -> Result<Option<Extrait>, &'static str> {
-    let obj = obj.as_object().ok_or("AttributeError")?;
-    let Some(msg) = obj.get("message").and_then(Value::as_object) else {
-        return Ok(None);
-    };
-    let Some(usage) = msg.get("usage").and_then(Value::as_object) else {
-        return Ok(None);
-    };
+/// Ce que `obj` apporte : clé, instant, trois compteurs. `None` si `obj` n'est pas un
+/// objet JSON (Python lèverait `AttributeError`) ou s'il est inutilisable.
+pub fn extraire(obj: &Value) -> Option<Extrait> {
+    let obj = obj.as_object()?;
+    let msg = obj.get("message").and_then(Value::as_object)?;
+    let usage = msg.get("usage").and_then(Value::as_object)?;
     let ident = match msg.get("id") {
         Some(v) if !est_faux(v) => v,
         _ => match obj.get("uuid") {
             Some(v) if !est_faux(v) => v,
-            _ => return Ok(None),
+            _ => return None,
         },
     };
     let mut tokens = [0i64; 3];
     for (case, champ) in tokens.iter_mut().zip(CHAMPS_COMPTES) {
-        match compteur(usage.get(champ)) {
-            Some(n) => *case = n,
-            None => return Ok(None),
-        }
+        *case = compteur(usage.get(champ))?;
     }
-    let Some(ident) = en_texte(ident) else {
-        return Ok(None);
-    };
+    let ident = en_texte(ident)?;
     let requete = match obj.get("requestId") {
-        Some(v) if !est_faux(v) => match en_texte(v) {
-            Some(t) => t,
-            None => return Ok(None),
-        },
+        Some(v) if !est_faux(v) => en_texte(v)?,
         _ => String::new(),
     };
     let moment = obj.get("timestamp").and_then(horodatage);
-    Ok(Some(((ident, requete), moment, tokens)))
+    Some(((ident, requete), moment, tokens))
 }
 
-pub fn extraire(obj: &Value) -> Option<Extrait> {
-    extraire_strict(obj).ok().flatten()
-}
-
-/// Comme `modele_de`, mais rend `Err("AttributeError")` quand `obj` n'est pas un objet.
-pub fn modele_de_strict(obj: &Value) -> Result<Option<String>, &'static str> {
-    let obj = obj.as_object().ok_or("AttributeError")?;
+/// Le modèle d'une ligne d'assistant. `None` si `obj` n'est pas un objet.
+pub fn modele_de(obj: &Value) -> Option<String> {
+    let obj = obj.as_object()?;
     if obj.get("type").and_then(Value::as_str) != Some("assistant") {
-        return Ok(None);
+        return None;
     }
-    let Some(msg) = obj.get("message").and_then(Value::as_object) else {
-        return Ok(None);
-    };
-    Ok(match msg.get("model").and_then(Value::as_str) {
+    let msg = obj.get("message").and_then(Value::as_object)?;
+    match msg.get("model").and_then(Value::as_str) {
         Some(m) if !m.is_empty() && m != "<synthetic>" => Some(m.to_string()),
         _ => None,
-    })
-}
-
-pub fn modele_de(obj: &Value) -> Option<String> {
-    modele_de_strict(obj).ok().flatten()
+    }
 }
 
 // --- lecture --------------------------------------------------------------
@@ -1034,7 +1004,7 @@ mod tests {
         let maintenant = paris(2026, 3, 29, 14);
         assert_eq!(
             minuit_selon(&ParisFictif, maintenant),
-            Ok(utc(2026, 3, 28, 23))
+            Some(utc(2026, 3, 28, 23))
         );
     }
 
@@ -1045,7 +1015,7 @@ mod tests {
         let maintenant = paris(2026, 10, 25, 14);
         assert_eq!(
             minuit_selon(&ParisFictif, maintenant),
-            Ok(utc(2026, 10, 24, 22))
+            Some(utc(2026, 10, 24, 22))
         );
     }
 
@@ -1054,7 +1024,7 @@ mod tests {
         let maintenant = paris(2026, 1, 15, 10);
         assert_eq!(
             minuit_selon(&ParisFictif, maintenant),
-            Ok(utc(2026, 1, 14, 23))
+            Some(utc(2026, 1, 14, 23))
         );
     }
 
@@ -1076,7 +1046,7 @@ mod tests {
     }
 
     #[test]
-    fn test_minuit_local_ambigu_sous_tz_havane() {
+    fn minuit_local_ambigu_sous_tz_havane() {
         relancer_sous_tz(
             "America/Havana",
             "tokens::tests::enfant_minuit_ambigu_havane",
@@ -1092,7 +1062,7 @@ mod tests {
     }
 
     #[test]
-    fn test_minuit_local_inexistant_sous_tz_sao_paulo() {
+    fn minuit_local_inexistant_sous_tz_sao_paulo() {
         relancer_sous_tz(
             "America/Sao_Paulo",
             "tokens::tests::enfant_minuit_inexistant_sao_paulo",
@@ -1109,15 +1079,14 @@ mod tests {
     }
 
     #[test]
-    fn test_minuit_local_exceptions_python() {
-        assert_eq!(minuit_local_strict(f64::NAN), Err("ValueError"));
-        assert_eq!(minuit_local_strict(f64::INFINITY), Err("OverflowError"));
-        assert_eq!(minuit_local_strict(1e21), Err("OverflowError"));
-        assert_eq!(
-            minuit_local_strict(9_007_199_254_740_992.0),
-            Err("ValueError")
-        );
-        assert!(minuit_local_strict(0.0).is_ok());
+    fn minuit_local_exceptions_python() {
+        // Là où Python lève : NaN, infini, dépassement de `time_t`, année hors 1..=9999.
+        assert_eq!(minuit_selon(&Local, f64::NAN), None);
+        assert_eq!(minuit_selon(&Local, f64::INFINITY), None);
+        assert_eq!(minuit_selon(&Local, 1e21), None);
+        assert_eq!(minuit_selon(&Local, 9_007_199_254_740_992.0), None);
+        assert!(minuit_selon(&Local, 0.0).is_some());
+        assert_eq!(minuit_local(f64::NAN), 0.0);
     }
 
     // --- lecture ligne à ligne, sans liste intermédiaire ---
@@ -1304,8 +1273,8 @@ mod tests {
         assert_eq!(cle(base(json!(0), json!(null), json!(null))), None);
         assert_eq!(cle(base(json!(1.5), json!(null), json!(null))), None);
         assert_eq!(cle(base(json!("m"), json!(null), json!([1]))), None);
-        assert_eq!(extraire_strict(&json!("x")), Err("AttributeError"));
-        assert_eq!(modele_de_strict(&json!([])), Err("AttributeError"));
+        assert_eq!(extraire(&json!("x")), None);
+        assert_eq!(modele_de(&json!([])), None);
         assert_eq!(
             extraire(&json!({"message": {"id": "m", "usage": {"input_tokens": "x"}}})),
             None

@@ -6,7 +6,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::installation::{
-    CODESIGN, ENTETE_PLIST, Executeur, ecrire_atomique, ecrire_fichier_atomique, plist_chaine,
+    CODESIGN, ENTETE_PLIST, Executeur, ecrire_atomique, ecrire_fichier_atomique, erreur_io,
+    plist_chaine,
 };
 
 pub const NOM_BUNDLE: &str = "Discord Rich Claude.app";
@@ -76,10 +77,6 @@ pub fn retirer_lien(lien: &Path, binaire: &Path) -> io::Result<bool> {
     Ok(true)
 }
 
-fn erreur_io(action: &str, e: &io::Error) -> String {
-    format!("{action} impossible ({:?})", e.kind())
-}
-
 /// Copie `source` vers `cible` via un temporaire frère en 0o755, puis `rename`.
 fn copier_binaire(source: &Path, cible: &Path) -> io::Result<()> {
     let mut entree = fs::File::open(source)?;
@@ -87,7 +84,7 @@ fn copier_binaire(source: &Path, cible: &Path) -> io::Result<()> {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    // Le temporaire est créé par `ecrire_atomique` ; on y recopie le contenu en flux.
+    // Le temporaire est créé par `ecrire_atomique` ; on y recopie le contenu.
     let mut contenu = Vec::new();
     io::Read::read_to_end(&mut entree, &mut contenu)?;
     ecrire_atomique(cible, &contenu, 0o755, &format!(".{nom}."), |de, vers| {
@@ -141,13 +138,7 @@ pub fn installer_bundle(
 
 pub fn desinstaller_bundle(applications: &Path) -> io::Result<()> {
     let app = applications.join(NOM_BUNDLE);
-    // Garde contre un effacement hors cible : bon nom, et pas un lien.
-    if app.file_name().and_then(|n| n.to_str()) != Some(NOM_BUNDLE) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "chemin de bundle inattendu",
-        ));
-    }
+    // Garde contre un effacement hors cible : jamais un lien.
     match fs::symlink_metadata(&app) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e),

@@ -3,7 +3,6 @@ name = "discord-rich-claude"
 version = "0.1.0"
 edition = "2024"
 description = "Discord Rich Presence pour Claude Code"
-license = "MIT"
 
 [lib]
 name = "discord_rich_claude"
@@ -18,9 +17,9 @@ default = ["menu"]
 menu = ["dep:tray-icon", "dep:tao", "dep:ctrlc"]
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
+serde = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
-indexmap = { version = "2", features = ["serde"] }
+indexmap = "2"
 toml = "0.8"
 chrono = "0.4"
 similar = "2"
@@ -38,8 +37,3 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 strip = true
-
-# Les dépendances de la liste fermée sont déclarées dès le squelette ; les
-# modules qui les utilisent arrivent dans les tâches suivantes.
-[lints.cargo]
-unused_dependencies = "allow"

@@ -20,8 +20,8 @@ use commun::{
 use discord_rich_claude::bundle::binaire_du_bundle;
 use discord_rich_claude::chemins::Chemins;
 use discord_rich_claude::cli::{
-    Commande, commande_depuis, confirmer_depuis, desinstaller_vers, installer_vers, lancer_vers,
-    statut_vers,
+    Commande, USAGE, commande_depuis, confirmer_depuis, desinstaller_vers, installer_vers,
+    lancer_vers, principal, principal_vers, statut_vers,
 };
 use discord_rich_claude::config::ConfigSurveillee;
 use discord_rich_claude::daemon::{Daemon, EnMarche, Mode, demarrer};
@@ -143,9 +143,8 @@ fn desinstaller(chemins: &Chemins, euid: u32, confirmer: impl FnOnce(&str) -> bo
 
 #[test]
 fn test_erreur_demarrage_os_error_retourne_1_logge_et_imprime_sans_trace() {
-    // Sous le LaunchAgent (KeepAlive), une erreur non rattrapée au démarrage (dossier d'état
-    // invalide) donnerait une boucle d'erreurs : `lancer` logge une ligne, l'imprime sur
-    // stderr sans trace, et rend 1.
+    // Une erreur non rattrapée au démarrage (dossier d'état invalide) ne doit pas sortir en
+    // trace : `lancer` logge une ligne, l'imprime sur stderr sans trace, et rend 1.
     let _s = serie();
     installer_capture();
     vider_messages();
@@ -317,7 +316,12 @@ fn status_affiche_l_etat() {
 
 #[test]
 fn test_commande_inconnue() {
-    // `principal` n'est jamais appelé ici : sans argument, le binaire lance le daemon.
+    // Une commande inconnue rend 2 avant `Chemins::reels` : sûr à lancer. Sans argument,
+    // en revanche, `principal` lance le daemon : jamais appelé ainsi.
+    assert_eq!(principal(vec!["inconnue".into()]), 2);
+    let mut erreur = Vec::new();
+    assert_eq!(principal_vers(vec!["inconnue".into()], &mut erreur), 2);
+    assert_eq!(String::from_utf8(erreur).unwrap(), format!("{USAGE}\n"));
     let args = |v: &[&str]| -> Vec<String> { v.iter().map(|s| s.to_string()).collect() };
     assert_eq!(commande_depuis(&args(&["inconnue"])), Commande::Inconnue);
     assert_eq!(

@@ -12,53 +12,19 @@ use std::os::unix::fs::{FileTypeExt, PermissionsExt, symlink};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use commun::dossier_court;
+use commun::{dossier_court, installer_capture, messages, serie};
 use discord_rich_claude::serveur::{
     ErreurDemarrage, Gestionnaire, Serveur, demarrer_serveur, interroger_etat,
 };
 use discord_rich_claude::sessions::Evenement;
 use serde_json::json;
 
-static SERIE: Mutex<()> = Mutex::new(());
-
-/// Sérialise les tests du fichier (voir l'en-tête).
-fn serie() -> MutexGuard<'static, ()> {
-    SERIE.lock().unwrap_or_else(|e| e.into_inner())
-}
-
 fn corps(valeur: serde_json::Value) -> Vec<u8> {
     serde_json::to_vec(&valeur).unwrap()
-}
-
-// --- journal de test : capture tous les logs du processus de test ---
-
-struct Journal;
-static JOURNAL: Journal = Journal;
-static MESSAGES: Mutex<Vec<String>> = Mutex::new(Vec::new());
-
-impl log::Log for Journal {
-    fn enabled(&self, _: &log::Metadata) -> bool {
-        true
-    }
-    fn log(&self, r: &log::Record) {
-        if let Ok(mut m) = MESSAGES.lock() {
-            m.push(format!("{} {}", r.level(), r.args()));
-        }
-    }
-    fn flush(&self) {}
-}
-
-fn installer_journal() {
-    let _ = log::set_logger(&JOURNAL);
-    log::set_max_level(log::LevelFilter::Debug);
-}
-
-fn messages() -> Vec<String> {
-    MESSAGES.lock().map(|m| m.clone()).unwrap_or_default()
 }
 
 // --- serveur ---
@@ -101,7 +67,7 @@ struct Banc {
 }
 
 fn banc_avec(faux: Faux) -> Banc {
-    installer_journal();
+    installer_capture();
     let dossier = dossier_court();
     let socket = dossier.path().join("etat/daemon.sock");
     let faux = Arc::new(faux);
@@ -412,7 +378,7 @@ fn test_erreur_du_gestionnaire_n_arrete_pas_le_serveur() {
     assert!(
         messages()
             .iter()
-            .any(|m| m == "ERROR erreur sur un événement Stop : boum")
+            .any(|m| m == "ERROR discord_rich_claude::serveur erreur sur un événement Stop : boum")
     );
 }
 
@@ -433,7 +399,8 @@ fn test_erreur_inattendue_repond_500() {
     assert!(
         messages()
             .iter()
-            .any(|m| m == "ERROR erreur inattendue dans le traitement d'une requête : panique")
+            .any(|m| m
+                == "ERROR discord_rich_claude::serveur erreur inattendue dans le traitement d'une requête : panique")
     );
 }
 
@@ -515,7 +482,7 @@ fn requetes_mal_formees_sans_reponse_et_sans_fuite() {
     assert!(
         messages()
             .iter()
-            .any(|m| m.starts_with("DEBUG requête rejetée : "))
+            .any(|m| m.starts_with("DEBUG discord_rich_claude::serveur requête rejetée : "))
     );
     assert_pas_de_fuite();
     assert!(b.recus().is_empty());

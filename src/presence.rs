@@ -165,8 +165,10 @@ impl Presence {
         self.client_id = None;
         self.derniere = None;
         self.dernier_essai = maintenant;
-        if let Some(mut client) = client {
-            let _ = client.fermer();
+        if let Some(mut client) = client
+            && let Err(e) = client.fermer()
+        {
+            log::warn!("fermeture de la connexion Discord : {}", e.genre);
         }
     }
 
@@ -353,17 +355,11 @@ pub fn fabrique_reelle() -> Fabrique {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::aides_tests::dossier_court;
     use std::cell::RefCell;
     use std::os::unix::net::UnixListener;
     use std::sync::{Arc, Mutex, Once};
     use std::thread::JoinHandle;
-
-    fn dossier_court() -> tempfile::TempDir {
-        tempfile::Builder::new()
-            .prefix("drc-")
-            .tempdir_in("/tmp")
-            .expect("dossier court sous /tmp")
-    }
 
     fn carte(details: &str) -> Carte {
         Carte {
@@ -600,6 +596,34 @@ mod tests {
         h.regler(15.0);
         p.soumettre(Some(&carte("A")), Some("42"));
         assert_eq!(compte(&journal, "connecter:42"), 2);
+    }
+
+    #[test]
+    fn abandon_dont_la_fermeture_echoue_logge_un_warning() {
+        // Après un échec de publication, le client jeté est fermé : si `fermer` échoue
+        // aussi, c'est un WARNING (comme `fermer`), jamais un silence.
+        init_logs();
+        let (journal, h) = (Journal::default(), Horloge::default());
+        let options = Options {
+            echec_publication: true,
+            echec_fermeture: true,
+            ..Options::default()
+        };
+        let mut p = presence_avec(&journal, &h, options, 15.0);
+        LOGS.with(|l| l.borrow_mut().clear());
+        p.soumettre(Some(&carte("A")), Some("42"));
+        let logs = LOGS.with(|l| l.borrow().clone());
+        let fermetures: Vec<&String> = logs
+            .iter()
+            .filter(|(n, m)| *n == log::Level::Warn && m.starts_with("fermeture de la connexion"))
+            .map(|(_, m)| m)
+            .collect();
+        assert_eq!(fermetures.len(), 1, "{logs:?}");
+        assert!(
+            fermetures[0].contains(CONNEXION_FERMEE.genre),
+            "{fermetures:?}"
+        );
+        assert!(!p.connecte());
     }
 
     #[test]

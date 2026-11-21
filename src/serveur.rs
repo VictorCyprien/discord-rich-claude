@@ -624,10 +624,10 @@ fn remplacer_ancien_socket(chemin: &Path) -> Result<(), ErreurDemarrage> {
 }
 
 /// Pose un umask et le restaure à la sortie, même en cas d'erreur ou de panique.
-struct GardeUmask(libc::mode_t);
+pub(crate) struct GardeUmask(libc::mode_t);
 
 impl GardeUmask {
-    fn poser(masque: libc::mode_t) -> Self {
+    pub(crate) fn poser(masque: libc::mode_t) -> Self {
         // SAFETY : `umask` ne touche qu'au masque du processus.
         Self(unsafe { libc::umask(masque) })
     }

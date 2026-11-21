@@ -1,4 +1,4 @@
-//! Bibliothèque de discord-rich-claude (modules ajoutés dans les tâches suivantes).
+//! Bibliothèque de discord-rich-claude : le daemon, l'installation et la ligne de commande.
 
 pub mod bundle;
 pub mod carte;
@@ -13,3 +13,6 @@ pub mod presence;
 pub mod serveur;
 pub mod sessions;
 pub mod tokens;
+
+#[cfg(test)]
+mod aides_tests;

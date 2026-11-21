@@ -175,7 +175,7 @@ fn lire_octets(chemin: &Path) -> Result<Option<Vec<u8>>, String> {
     }
 }
 
-fn erreur_io(action: &str, e: &io::Error) -> String {
+pub(crate) fn erreur_io(action: &str, e: &io::Error) -> String {
     format!("{action} impossible ({:?})", e.kind())
 }
 
@@ -459,20 +459,31 @@ pub fn installer_launch_agent(
     // `bootstrap` juste après un `bootout` échoue par intermittence (code 5 ou 37)
     // tant que l'ancienne instance finit de se décharger : quelques essais suffisent.
     let chemin = chemin_plist.to_string_lossy().into_owned();
-    for tentative in 1..=REESSAIS_BOOTSTRAP {
+    // Les essais intermédiaires ne rendent la main que sur un succès ou un échec définitif ;
+    // le dernier essai rend toujours son résultat.
+    for _ in 1..REESSAIS_BOOTSTRAP {
         let sortie = executer(&[LAUNCHCTL, "bootstrap", &domaine, &chemin])?;
         if sortie.code == 0 {
             return Ok(());
         }
-        if !CODES_BOOTSTRAP_TRANSITOIRES.contains(&sortie.code) || tentative == REESSAIS_BOOTSTRAP {
-            return Err(ErreurLaunchctl::Echec {
-                code: sortie.code,
-                stderr: String::from_utf8_lossy(&sortie.stderr).trim().to_string(),
-            });
+        if !CODES_BOOTSTRAP_TRANSITOIRES.contains(&sortie.code) {
+            return Err(echec_launchctl(&sortie));
         }
         dormir(DELAI_REESSAI_BOOTSTRAP);
     }
-    Ok(())
+    let sortie = executer(&[LAUNCHCTL, "bootstrap", &domaine, &chemin])?;
+    if sortie.code == 0 {
+        Ok(())
+    } else {
+        Err(echec_launchctl(&sortie))
+    }
+}
+
+fn echec_launchctl(sortie: &Sortie) -> ErreurLaunchctl {
+    ErreurLaunchctl::Echec {
+        code: sortie.code,
+        stderr: String::from_utf8_lossy(&sortie.stderr).trim().to_string(),
+    }
 }
 
 pub fn desinstaller_launch_agent(
@@ -491,6 +502,7 @@ pub fn desinstaller_launch_agent(
 mod tests {
     use super::*;
     use crate::chemins::{COMMANDE_HOOK, LABEL};
+    use crate::serveur::GardeUmask;
     use chrono::NaiveDate;
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
@@ -500,18 +512,12 @@ mod tests {
     /// ne se chevauchent pas.
     static VERROU_UMASK: Mutex<()> = Mutex::new(());
 
-    struct GardeUmask(libc::mode_t);
-    impl GardeUmask {
-        fn poser(masque: libc::mode_t) -> Self {
-            // SAFETY : `umask` ne touche qu'au masque du processus.
-            Self(unsafe { libc::umask(masque) })
-        }
-    }
-    impl Drop for GardeUmask {
-        fn drop(&mut self) {
-            // SAFETY : voir `poser`.
-            unsafe { libc::umask(self.0) };
-        }
+    #[test]
+    fn launchctl_et_codesign_sont_des_chemins_absolus() {
+        // Jamais une recherche dans le `PATH` : un binaire du même nom posé ailleurs ne
+        // doit pas être lancé à la place de celui du système.
+        assert!(Path::new(LAUNCHCTL).is_absolute());
+        assert!(Path::new(CODESIGN).is_absolute());
     }
 
     fn tiers() -> Value {

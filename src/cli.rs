@@ -27,7 +27,7 @@ use crate::serveur::{ErreurDemarrage, interroger_etat};
 use crate::sessions::pid_vivant;
 use crate::tokens::SuiviTokens;
 
-const USAGE: &str = "usage : discord-rich-claude <run|install|uninstall|status>";
+pub const USAGE: &str = "usage : discord-rich-claude <run|install|uninstall|status>";
 const DELAI_STATUT: Duration = Duration::from_secs(2);
 
 fn ecrire(flux: &mut dyn Write, texte: &str) {
@@ -69,8 +69,8 @@ pub fn lancer_vers(
             1
         }
         Err(ErreurDemarrage::Io(e)) => {
-            // Une ligne dans le journal et sur stderr, jamais de trace : sous le LaunchAgent
-            // (KeepAlive), un échec de démarrage deviendrait une boucle d'erreurs.
+            // Une ligne dans le journal et sur stderr, jamais de trace : sous le LaunchAgent,
+            // stderr part dans un fichier.
             log::error!(
                 "démarrage impossible ({:?}), socket {}",
                 e.kind(),
@@ -455,13 +455,19 @@ pub fn commande_depuis(args: &[String]) -> Commande {
 
 /// Point d'entrée : `args` sont les arguments après le nom du programme.
 pub fn principal(args: Vec<String>) -> i32 {
+    principal_vers(args, &mut io::stderr())
+}
+
+/// `principal`, avec le flux d'erreur en paramètre. Une commande inconnue rend 2 avant tout
+/// accès aux vrais chemins : c'est la seule que les tests peuvent lancer.
+pub fn principal_vers(args: Vec<String>, erreur: &mut dyn Write) -> i32 {
     let commande = commande_depuis(&args);
     if commande == Commande::Inconnue {
-        eprintln!("{USAGE}");
+        ecrire(erreur, USAGE);
         return 2;
     }
     let Some(chemins) = Chemins::reels() else {
-        eprintln!("discord-rich-claude : HOME introuvable");
+        ecrire(erreur, "discord-rich-claude : HOME introuvable");
         return 1;
     };
     // SAFETY : `geteuid` n'a aucun effet de bord.
@@ -477,7 +483,7 @@ pub fn principal(args: Vec<String>) -> i32 {
                 confirmer_terminal(&chemins.settings_claude, diff)
             }),
             Err(e) => {
-                eprintln!("exécutable introuvable ({:?})", e.kind());
+                ecrire(erreur, &format!("exécutable introuvable ({:?})", e.kind()));
                 1
             }
         },

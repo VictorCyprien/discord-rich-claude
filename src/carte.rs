@@ -40,7 +40,7 @@ pub fn formater_nombre(n: i64) -> String {
     format!("{:.1} M", n as f64 / 1_000_000.0).replace('.', ",")
 }
 
-/// Les `n` premiers octets de `s` sont-ils des chiffres ASCII ?
+/// `s` est-elle non vide, et faite uniquement de chiffres ASCII ?
 fn chiffres(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
 }
@@ -178,11 +178,11 @@ pub fn tronquer(texte: &str) -> String {
 }
 
 /// `a // b` de Python sur des flottants (`float_divmod` de CPython) : pas
-/// toujours égal à `floor(a / b)`. Rend `Err(nom de l'exception)` là où Python
-/// lève (division par zéro, résultat que `int()` refuse).
-fn division_entiere_python(a: f64, b: f64) -> Result<f64, &'static str> {
+/// toujours égal à `floor(a / b)`. Rend `None` là où Python lève (division par
+/// zéro, résultat que `int()` refuse).
+fn division_entiere_python(a: f64, b: f64) -> Option<f64> {
     if b == 0.0 {
-        return Err("ZeroDivisionError");
+        return None;
     }
     let reste = a % b;
     let mut quotient = (a - reste) / b;
@@ -195,22 +195,13 @@ fn division_entiere_python(a: f64, b: f64) -> Result<f64, &'static str> {
     } else {
         0.0
     };
-    if plancher.is_nan() {
-        Err("ValueError")
-    } else if plancher.is_infinite() {
-        Err("OverflowError")
-    } else {
-        Ok(plancher)
-    }
+    plancher.is_finite().then_some(plancher)
 }
 
-/// Comme `est_vue_b`, mais rend le nom de l'exception Python là où elle lève.
-pub fn est_vue_b_strict(maintenant: f64, rotation_s: f64) -> Result<bool, &'static str> {
-    division_entiere_python(maintenant, rotation_s).map(|q| q.rem_euclid(2.0) == 1.0)
-}
-
+/// La carte B (nombre de sessions et cumul) s'affiche-t-elle à cet instant ? `false` là
+/// où Python lèverait une exception.
 pub fn est_vue_b(maintenant: f64, rotation_s: f64) -> bool {
-    est_vue_b_strict(maintenant, rotation_s).unwrap_or(false)
+    division_entiere_python(maintenant, rotation_s).is_some_and(|q| q.rem_euclid(2.0) == 1.0)
 }
 
 pub fn construire_carte(
@@ -412,15 +403,12 @@ mod tests {
 
     #[test]
     fn est_vue_b_exceptions_python() {
-        assert_eq!(est_vue_b_strict(1.0, 0.0), Err("ZeroDivisionError"));
-        assert_eq!(est_vue_b_strict(f64::NAN, 2.0), Err("ValueError"));
-        assert_eq!(
-            est_vue_b_strict(2_147_483_648.0, 5e-324),
-            Err("OverflowError")
-        );
-        // `-1.0 // inf` vaut -1.0 en Python (donc impair), pas -0.0.
-        assert_eq!(est_vue_b_strict(-1.0, f64::INFINITY), Ok(true));
+        // Là où Python lève : division par zéro, NaN, dépassement.
         assert!(!est_vue_b(1.0, 0.0));
+        assert!(!est_vue_b(f64::NAN, 2.0));
+        assert!(!est_vue_b(2_147_483_648.0, 5e-324));
+        // `-1.0 // inf` vaut -1.0 en Python (donc impair), pas -0.0.
+        assert!(est_vue_b(-1.0, f64::INFINITY));
     }
 
     #[test]

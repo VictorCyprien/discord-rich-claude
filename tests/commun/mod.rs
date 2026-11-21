@@ -1,4 +1,4 @@
-//! Aides communes aux tests d'intégration (et, par `#[path]`, aux tests unitaires).
+//! Aides communes aux tests d'intégration (`mod commun;` dans chaque fichier de `tests/`).
 #![allow(dead_code)]
 
 use tempfile::TempDir;
