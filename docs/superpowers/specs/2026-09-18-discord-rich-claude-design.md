@@ -314,3 +314,88 @@ Trois états, tenus en mémoire. Au lancement du daemon (login compris), l'état
 - `install` pose aussi le lien `~/.local/bin/discord-rich-claude` vers le binaire du bundle. Il refuse, sans rien modifier, si une autre entrée occupe ce chemin (par exemple le lien de la version Python posé par `uv tool`). `uninstall` retire ce lien seulement s'il pointe vers le binaire du bundle.
 - `uninstall` retire nos hooks, le LaunchAgent et le bundle ; il garde la config. Le « o » explicite sur `settings.json`, le refus de tourner en root, les sauvegardes et les droits de 8 ne changent pas.
 - CLI : `run`, `install`, `uninstall`, `status`. Ouvrir l'app (aucun argument) équivaut à `run` ; c'est la façon de relancer après Quitter. Pas de `pause` ni `resume` en ligne de commande : seul le menu change l'état.
+
+## 15. Amendement du 2026-11-21 : projets dans le menu, Clauderune
+
+Là où elle diverge des sections précédentes, cette section fait foi.
+
+### 15.1 Alias
+
+Un projet de la liste blanche peut porter un alias, affiché sur Discord à la place du nom de son dossier :
+
+```toml
+[projets]
+autorises = [
+  "~/Workspace/Perso/discord-rich-claude",
+]
+
+[projets.alias]
+"~/Workspace/Perso/discord-rich-claude" = "DiscordRichClaude"
+```
+
+- Clé : un chemin de `autorises`, comparé après résolution, comme en 7.2. Une clé qui ne désigne aucun chemin autorisé rend la config invalide.
+- Nom affiché (remplace la dernière puce de 7.2) : l'alias du chemin autorisé s'il en a un, sinon le dernier élément de ce chemin. Vaut aussi pour un sous-dossier ou un worktree.
+- Règles : un texte, sans espaces au début ni à la fin, de 1 à 32 caractères (comptés en caractères, pas en octets), sans caractère de contrôle. Un alias hors règles rend la config invalide (7.1 : rien d'affiché). Retomber sur le nom du dossier montrerait le nom que l'alias devait cacher.
+- Depuis le menu, un alias vide ou égal au nom du dossier n'est pas écrit : le projet n'a plus d'alias.
+- Deux projets peuvent porter le même alias.
+
+### 15.2 Menu « Projets »
+
+Remplace la dernière puce de 14.3 : le menu montre les projets de la liste blanche (nom affiché et chemin), jamais de session ni de projet hors de la liste.
+
+```
+Allumé
+──────────
+Allumer
+Mettre en pause
+Arrêter
+──────────
+Projets ▸   AURA ▸
+            DiscordRichClaude ▸   ~/Workspace/Perso/discord-rich-claude   (grisé)
+            ──────────            ──────────
+            Ajouter un projet…    Renommer…
+                                  Changer le dossier…
+                                  Retirer…
+──────────
+Quitter
+```
+
+- Projets triés par nom affiché, sans tenir compte de la casse. Liste vide : une ligne grisée « Aucun projet », puis « Ajouter un projet… ». Config invalide ou en lien symbolique : une ligne grisée « config.toml invalide », puis « Ajouter un projet… » (qui affichera l'erreur).
+- Chemin affiché sous la forme `~/…` quand il est sous le dossier personnel, tel qu'écrit dans la config.
+- Le menu « Projets » est disponible dans les trois états.
+- Il se reconstruit après une modification faite par le menu, et quand le daemon recharge une config modifiée à la main (boucle de contrôle, 4.4).
+
+Actions et libellés, codés en dur. Titre de tous les dialogues : « Clauderune ».
+
+- « Ajouter un projet… » : sélecteur de dossier « Choisir le dossier du projet ». Puis champ « Nom affiché sur Discord : », prérempli avec le nom du dossier, boutons « Annuler » et « OK ».
+- « Renommer… » : même champ, prérempli avec le nom affiché.
+- « Changer le dossier… » : sélecteur « Choisir le nouveau dossier du projet ». L'alias est gardé.
+- « Retirer… » : « Retirer « <nom affiché> » des projets affichés ? », boutons « Annuler » et « Retirer ». L'alias part avec le projet.
+- « Annuler » ne change rien.
+- Erreurs, dans une alerte avec un bouton « OK » :
+  - « Ce dossier est déjà dans la liste. » (ajout, ou changement vers un dossier déjà autorisé ; comparaison sur chemins résolus) ;
+  - « Nom invalide : 1 à 32 caractères, sans caractère de contrôle. » ;
+  - « config.toml est invalide : corrige-la avant de modifier les projets. » ;
+  - « config.toml est un lien symbolique : modifie-la à la main. » ;
+  - « Impossible d'écrire config.toml (voir le journal). ».
+- Dialogues : `/usr/bin/osascript` (chemin absolu), lancé sur un fil à part pour que le menu reste réactif. Les textes (libellés, nom prérempli) passent en arguments (`on run argv`), jamais collés dans le source AppleScript. Une seule édition à la fois : un clic pendant une édition en cours est ignoré.
+- Journal : « projets modifiés depuis le menu », sans chemin ni alias.
+
+### 15.3 Écriture de `config.toml`
+
+- Le menu écrit `config.toml` ; `install` le crée toujours s'il est absent (8).
+- Avant d'écrire, le fichier est relu et validé (7.1, 15.1). Absent : on part de la config par défaut. Invalide ou lien symbolique : refus, aucune écriture, alerte d'erreur.
+- Réécriture complète depuis le modèle commenté : `client_id`, `inactif_apres_min`, `masquer_apres_min`, `rotation_s`, `[projets] autorises`, `[projets.alias]` (table omise si vide). Les valeurs gardent leur forme écrite (chemins en `~/…`, entiers ou décimaux). Une valeur absente est écrite avec sa valeur par défaut. Les commentaires personnels et les clés inconnues sont perdus.
+- Un dossier ajouté par le menu s'écrit en `~/…` s'il est sous le dossier personnel, sinon en chemin absolu.
+- Écriture atomique : fichier temporaire dans le même dossier, en 0600, puis `rename`. Le fichier final est en 0600.
+- Après l'écriture, le daemon recharge la config tout de suite, sans attendre la boucle de contrôle.
+
+### 15.4 Clauderune
+
+- Nom d'affichage de l'app : « Clauderune ». `install` crée `~/Applications/Clauderune.app`, avec `CFBundleName` et `CFBundleDisplayName` à « Clauderune ». Le tooltip de l'icône de barre de menus dit « Clauderune ».
+- Inchangés : le binaire `discord-rich-claude`, `CFBundleIdentifier` et label du LaunchAgent `local.discord-rich-claude`, `~/.config/discord-rich-claude`, le journal, le socket, la commande de hook, le lien `~/.local/bin/discord-rich-claude`.
+- Migration : `install` retire `~/Applications/Discord Rich Claude.app` s'il existe (jamais à travers un lien symbolique). Un lien `~/.local/bin/discord-rich-claude` qui pointe vers le binaire de l'ancien bundle compte comme le nôtre : il est remplacé, pas refusé. `uninstall` retire les deux bundles et un lien vers l'un ou l'autre.
+- Icône d'app : pixel art original (bulle de chat blurple, astérisque terracotta, fond marine), sans élément repris d'un jeu. Source `assets/clauderune.png` (128 × 128), généré avec PixelLab. `assets/AppIcon.icns` en est tiré (`iconutil`, agrandi au plus proche voisin) et embarqué dans le binaire. `install` l'écrit dans `Contents/Resources/AppIcon.icns`, `CFBundleIconFile` vaut `AppIcon`.
+- Icône de barre de menus : le même motif en monochrome (template), dessiné à la main sur une grille de 18 × 18 pixels logiques, rendue en 36 × 36. Trois variantes : Allumé, bulle pleine avec l'astérisque en creux ; En pause, contour de bulle et deux barres ; Arrêté, contour de bulle seul.
+- Côté Discord, rien ne change : le nom de l'application dans le Developer Portal et l'image `logo` restent.
+- Aucune crate ajoutée.
