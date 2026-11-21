@@ -45,35 +45,84 @@ pub fn entrees(mode: Mode) -> [Entree; 5] {
 
 pub const COTE_ICONE: u32 = 36;
 
-/// Couverture (0.0 à 1.0) du pixel `(x, y)` par une forme : bord adouci sur un pixel.
-fn couverture_disque(x: f64, y: f64, rayon: f64) -> f64 {
-    let centre = f64::from(COTE_ICONE) / 2.0;
-    let distance = ((x + 0.5 - centre).powi(2) + (y + 0.5 - centre).powi(2)).sqrt();
-    (rayon + 0.5 - distance).clamp(0.0, 1.0)
-}
+/// Dessin sur grille 18 × 18 : `#` opaque, `.` transparent. Chaque case fait 2 × 2 pixels.
+const GRILLE_ALLUME: &str = "\
+..................
+...#############..
+..###############.
+..#######.#######.
+..####.##.##.####.
+..#####.#.#.#####.
+..######...######.
+..###.........###.
+..######...######.
+..#####.#.#.#####.
+..####.##.##.####.
+..#######.#######.
+..###############.
+...#############..
+....###...........
+....##............
+....#.............
+..................
+";
 
-/// Icône RGBA 36×36, noire avec un canal alpha (forme « template » : macOS la teinte).
-/// Disque plein pour `Allume`, deux barres pour `Pause`, anneau pour `Arrete`.
+const GRILLE_PAUSE: &str = "\
+..................
+...#############..
+..#.............#.
+..#.............#.
+..#...##...##...#.
+..#...##...##...#.
+..#...##...##...#.
+..#...##...##...#.
+..#...##...##...#.
+..#...##...##...#.
+..#...##...##...#.
+..#.............#.
+..#.............#.
+...#...#########..
+....#.#...........
+....##............
+....#.............
+..................
+";
+
+const GRILLE_ARRETE: &str = "\
+..................
+...#############..
+..#.............#.
+..#.............#.
+..#.............#.
+..#.............#.
+..#.............#.
+..#.............#.
+..#.............#.
+..#.............#.
+..#.............#.
+..#.............#.
+..#.............#.
+...#...#########..
+....#.#...........
+....##............
+....#.............
+..................
+";
+
+/// Icône RGBA 36×36, noire avec un canal alpha (forme « template » : macOS la teinte),
+/// dessinée depuis la grille du mode.
 pub fn icone(mode: Mode) -> Vec<u8> {
+    let grille = match mode {
+        Mode::Allume => GRILLE_ALLUME,
+        Mode::Pause => GRILLE_PAUSE,
+        Mode::Arrete => GRILLE_ARRETE,
+    };
+    let lignes: Vec<&[u8]> = grille.lines().map(str::as_bytes).collect();
     let mut rgba = Vec::with_capacity((COTE_ICONE * COTE_ICONE * 4) as usize);
-    for y in 0..COTE_ICONE {
-        for x in 0..COTE_ICONE {
-            let (fx, fy) = (f64::from(x), f64::from(y));
-            let couverture = match mode {
-                Mode::Allume => couverture_disque(fx, fy, 14.0),
-                Mode::Pause => {
-                    let barre = (9..16).contains(&x) || (20..27).contains(&x);
-                    if barre && (8..28).contains(&y) {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
-                Mode::Arrete => {
-                    (couverture_disque(fx, fy, 14.0) - couverture_disque(fx, fy, 10.0)).max(0.0)
-                }
-            };
-            rgba.extend_from_slice(&[0, 0, 0, (couverture * 255.0).round() as u8]);
+    for y in 0..COTE_ICONE as usize {
+        for x in 0..COTE_ICONE as usize {
+            let alpha = if lignes[y / 2][x / 2] == b'#' { 255 } else { 0 };
+            rgba.extend_from_slice(&[0, 0, 0, alpha]);
         }
     }
     rgba
@@ -335,7 +384,7 @@ fn creer_interface(
         .with_menu(Box::new(menu))
         .with_icon(icone_tray(mode).ok_or("icône")?)
         .with_icon_as_template(true)
-        .with_tooltip("Discord Rich Claude")
+        .with_tooltip("Clauderune")
         .build()
         .map_err(|_| "icône de barre de menus")?;
     Ok(Interface {
@@ -565,11 +614,52 @@ mod tests {
             assert!(rgba.chunks(4).any(|p| p[3] == 255));
             assert!(rgba.chunks(4).any(|p| p[3] == 0));
         }
-        // Le centre : plein pour le disque, vide pour l'anneau et pour l'espace entre barres.
+        // Corps plein pour la forme allumée ; centre vide pour la boîte vide et pour l'espace entre barres.
         let alpha = |m: Mode, x: usize, y: usize| icone(m)[(y * 36 + x) * 4 + 3];
-        assert_eq!(alpha(Mode::Allume, 18, 18), 255);
+        assert_eq!(alpha(Mode::Allume, 6, 18), 255);
         assert_eq!(alpha(Mode::Arrete, 18, 18), 0);
         assert_eq!(alpha(Mode::Pause, 18, 18), 0);
+    }
+
+    const MODES: [Mode; 3] = [Mode::Allume, Mode::Pause, Mode::Arrete];
+
+    fn grille(mode: Mode) -> &'static str {
+        match mode {
+            Mode::Allume => GRILLE_ALLUME,
+            Mode::Pause => GRILLE_PAUSE,
+            Mode::Arrete => GRILLE_ARRETE,
+        }
+    }
+
+    #[test]
+    fn grilles_de_18_sur_18() {
+        for m in MODES {
+            let lignes: Vec<&str> = grille(m).lines().collect();
+            assert_eq!(lignes.len(), 18);
+            assert!(lignes.iter().all(|l| l.chars().count() == 18));
+            assert!(
+                lignes
+                    .iter()
+                    .all(|l| l.chars().all(|c| c == '#' || c == '.'))
+            );
+        }
+    }
+
+    #[test]
+    fn icone_suit_la_grille() {
+        for m in MODES {
+            let rgba = icone(m);
+            for (y, ligne) in grille(m).lines().enumerate() {
+                for (x, c) in ligne.chars().enumerate() {
+                    let attendu = if c == '#' { 255 } else { 0 };
+                    assert_eq!(
+                        rgba[((2 * y) * 36 + 2 * x) * 4 + 3],
+                        attendu,
+                        "{m:?} ({x}, {y})"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

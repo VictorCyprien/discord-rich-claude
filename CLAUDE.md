@@ -24,10 +24,15 @@ Le projet reste en français (code, tests, libellés, commits) : ne rien traduir
 - `journal` : `daemon.log` avec rotation, hook de panique.
 - `daemon` : assemblage, états Allumé, En pause, Arrêté.
 - `installation` : hooks de `settings.json`, LaunchAgent.
-- `bundle` : app `~/Applications/Discord Rich Claude.app`, signature ad hoc, lien de commande.
+- `bundle` : app `~/Applications/Clauderune.app` (icône embarquée), signature ad hoc, lien de commande, retrait de l'ancienne `Discord Rich Claude.app`.
+- `projets` : config éditable, réécriture de `config.toml`.
+- `dialogues` : dialogues `osascript`.
+- `edition` : enchaînement d'une édition (dialogues, puis écriture).
 - `menu` : barre de menus (tray-icon, tao).
 - `cli` : ligne de commande.
 - `aides_tests.rs` : aides des tests unitaires de la lib (`cfg(test)`).
+
+`assets/` : icônes (`AppIcon.icns` embarquée dans le bundle, `clauderune.png`).
 
 `tests/` : tests d'intégration (`cli`, `integration`, `serveur`). `tests/commun` : aides partagées (`dossier_court`, `serie`, faux client Discord).
 
@@ -42,6 +47,7 @@ Le projet reste en français (code, tests, libellés, commits) : ne rien traduir
 - Sous macOS, un chemin de socket Unix est limité à 104 octets : les tests de socket utilisent `commun::dossier_court()` (tests d'intégration) ou `crate::aides_tests::dossier_court()` (tests unitaires de la lib).
 - Les tests qui démarrent un serveur sont sérialisés par `serie()` (`tests/commun`) : l'umask est global au processus.
 - Les tests ne touchent jamais les vrais chemins utilisateur (`~/.claude`, `~/.config`, `~/Library`, `~/Applications`, `~/.local/bin`) : `installation`, `bundle` et `chemins` sont testés avec des chemins temporaires (`tempfile`), jamais les emplacements réels. Aucun test n'appelle le vrai `launchctl` ni le vrai `codesign` : `executer` est injectable (`installer_launch_agent`, `desinstaller_launch_agent`, `installer_bundle`) et remplacé par un faux dans les tests.
+- Aucun test ne lance le vrai `osascript` : le `Lanceur` est injectable et remplacé par un faux dans les tests.
 - Aucun test n'appelle `principal` ni `principal_vers` (public) sans argument : sans argument, ils lancent le daemon.
 - Noms des tests : un test porté depuis pytest garde `test_<nom pytest>`, un test nouveau n'a pas de préfixe `test_`.
 - La confirmation de `install`/`uninstall` sur `~/.claude/settings.json` (le « o » explicite) revient à Victor : ne jamais y répondre à sa place, ni la simuler, ni contourner `confirmer_terminal` / `confirmer_depuis` (`cli.rs`).

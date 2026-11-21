@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use commun::{
     Journal, dossier_court, fabrique_fausse, installer_capture, messages, serie, vider_messages,
 };
-use discord_rich_claude::bundle::binaire_du_bundle;
+use discord_rich_claude::bundle::{binaire_de_l_ancien_bundle, binaire_du_bundle};
 use discord_rich_claude::chemins::Chemins;
 use discord_rich_claude::cli::{
     Commande, USAGE, commande_depuis, confirmer_depuis, desinstaller_vers, installer_vers,
@@ -634,12 +634,7 @@ fn uninstall_retire_hooks_agent_et_bundle_mais_garde_la_config() {
     )));
     assert!(chemins.config.exists());
     assert!(!chemins.launch_agent.exists());
-    assert!(
-        !chemins
-            .applications
-            .join("Discord Rich Claude.app")
-            .exists()
-    );
+    assert!(!chemins.applications.join("Clauderune.app").exists());
     assert!(
         r.appels
             .iter()
@@ -700,6 +695,54 @@ fn install_lien_deja_correct_reste_inchange() {
         .modified()
         .unwrap();
     assert_eq!(avant, apres);
+}
+
+fn poser_ancienne_installation(chemins: &Chemins) -> PathBuf {
+    let ancien = binaire_de_l_ancien_bundle(&chemins.applications);
+    fs::create_dir_all(ancien.parent().unwrap()).unwrap();
+    fs::write(&ancien, "ancien binaire").unwrap();
+    fs::create_dir_all(chemins.lien_commande.parent().unwrap()).unwrap();
+    symlink(&ancien, &chemins.lien_commande).unwrap();
+    ancien
+}
+
+#[test]
+fn install_migre_l_ancien_bundle_et_son_lien() {
+    let _s = serie();
+    let (dossier, chemins) = chemins_temporaires();
+    let ancien = poser_ancienne_installation(&chemins);
+    let r = installer(&chemins, &binaire_factice(dossier.path()), 501, true);
+    assert_eq!(r.code, 0, "{}", r.erreur);
+    let nouveau = binaire_du_bundle(&chemins.applications);
+    assert!(nouveau.exists());
+    assert!(!ancien.exists());
+    assert!(
+        !chemins
+            .applications
+            .join("Discord Rich Claude.app")
+            .exists()
+    );
+    assert_eq!(fs::read_link(&chemins.lien_commande).unwrap(), nouveau);
+    let agent = r.sortie.find("LaunchAgent chargé").unwrap();
+    let retire = r.sortie.find("ancienne app retirée").expect(&r.sortie);
+    assert!(agent < retire, "{}", r.sortie);
+    assert!(r.sortie.contains("lien mis à jour : "), "{}", r.sortie);
+}
+
+#[test]
+fn uninstall_retire_un_lien_vers_l_ancien_bundle() {
+    let _s = serie();
+    let (_dossier, chemins) = chemins_temporaires();
+    poser_ancienne_installation(&chemins);
+    let r = desinstaller(&chemins, 501, |_| true);
+    assert_eq!(r.code, 0, "{}", r.erreur);
+    assert!(fs::symlink_metadata(&chemins.lien_commande).is_err());
+    assert!(
+        !chemins
+            .applications
+            .join("Discord Rich Claude.app")
+            .exists()
+    );
 }
 
 /// Après un refus, ni `settings.json`, ni le plist, ni le bundle, ni la config n'existent.

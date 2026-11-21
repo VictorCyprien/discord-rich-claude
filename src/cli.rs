@@ -9,8 +9,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::bundle::{
-    EtatLien, binaire_du_bundle, desinstaller_bundle, etat_lien, installer_bundle, poser_lien,
-    retirer_lien,
+    EtatLien, NOM_ANCIEN_BUNDLE, binaire_du_bundle, desinstaller_bundle, etat_lien,
+    installer_bundle, poser_lien, retirer_ancien_bundle, retirer_lien,
 };
 use crate::chemins::{COMMANDE_HOOK, Chemins};
 use crate::config::{ConfigSurveillee, creer_config_par_defaut};
@@ -159,7 +159,7 @@ pub fn installer_vers(
     }
     // Avant toute autre étape : si une autre entrée occupe le lien, rien n'est modifié.
     let binaire_bundle = binaire_du_bundle(&chemins.applications);
-    let lien_a_creer = match etat_lien(&chemins.lien_commande, &binaire_bundle) {
+    let etat_du_lien = match etat_lien(&chemins.lien_commande, &chemins.applications) {
         Ok(EtatLien::Occupe) => {
             ecrire(
                 erreur,
@@ -170,7 +170,7 @@ pub fn installer_vers(
             );
             return 1;
         }
-        Ok(etat) => etat == EtatLien::Absent,
+        Ok(etat) => etat,
         Err(e) => {
             ecrire(
                 erreur,
@@ -268,20 +268,38 @@ pub fn installer_vers(
         }
     }
     ecrire(sortie, "  LaunchAgent chargé");
+    // Seulement après le LaunchAgent : l'ancien bundle reste utilisable tant que le nouveau ne l'est pas.
+    let ancien = chemins.applications.join(NOM_ANCIEN_BUNDLE);
+    match retirer_ancien_bundle(&chemins.applications) {
+        Ok(true) => ecrire(
+            sortie,
+            &format!("  ancienne app retirée : {}", ancien.display()),
+        ),
+        Ok(false) => {}
+        Err(_) => ecrire(
+            erreur,
+            &format!("  ancienne app laissée en place : {}", ancien.display()),
+        ),
+    }
 
     ecrire(sortie, "5/5 Commande");
-    if lien_a_creer {
-        if let Err(e) = poser_lien(&chemins.lien_commande, &binaire_bundle) {
+    if etat_du_lien != EtatLien::Correct {
+        if let Err(e) = poser_lien(&chemins.lien_commande, &chemins.applications) {
             ecrire(
                 erreur,
                 &format!("  {:?} : {}", e.kind(), chemins.lien_commande.display()),
             );
             return 1;
         }
+        let verbe = if etat_du_lien == EtatLien::Ancien {
+            "lien mis à jour"
+        } else {
+            "lien créé"
+        };
         ecrire(
             sortie,
             &format!(
-                "  lien créé : {} -> {}",
+                "  {verbe} : {} -> {}",
                 chemins.lien_commande.display(),
                 binaire_bundle.display()
             ),
@@ -352,11 +370,10 @@ pub fn desinstaller_vers(
         );
         return 1;
     }
-    let binaire_bundle = binaire_du_bundle(&chemins.applications);
-    match etat_lien(&chemins.lien_commande, &binaire_bundle) {
+    match etat_lien(&chemins.lien_commande, &chemins.applications) {
         Ok(EtatLien::Absent) => {}
-        Ok(EtatLien::Correct) => {
-            if let Err(e) = retirer_lien(&chemins.lien_commande, &binaire_bundle) {
+        Ok(EtatLien::Correct | EtatLien::Ancien) => {
+            if let Err(e) = retirer_lien(&chemins.lien_commande, &chemins.applications) {
                 ecrire(
                     erreur,
                     &format!("  {:?} : {}", e.kind(), chemins.lien_commande.display()),
