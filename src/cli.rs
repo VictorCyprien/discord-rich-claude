@@ -179,6 +179,14 @@ pub fn installer_vers(
             return 1;
         }
     };
+    // Un socket qui répond : l'app tourne, son bundle serait remplacé sous ses pieds.
+    if std::os::unix::net::UnixStream::connect(&chemins.socket).is_ok() {
+        ecrire(
+            erreur,
+            "l'app tourne : choisis « Quitter » dans son menu, puis relance install",
+        );
+        return 1;
+    }
     ecrire(sortie, "1/5 Hooks Claude Code");
     let resultat = match modifier_settings(
         &chemins.settings_claude,

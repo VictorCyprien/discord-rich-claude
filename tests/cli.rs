@@ -854,3 +854,23 @@ fn uninstall_laisse_un_lien_etranger() {
     assert_eq!(fs::read_link(&chemins.lien_commande).unwrap(), python);
     assert!(r.erreur.contains("laissé en place"), "{}", r.erreur);
 }
+
+#[test]
+fn install_refuse_si_l_app_tourne() {
+    let _s = serie();
+    let (dossier, chemins) = chemins_temporaires();
+    fs::create_dir_all(chemins.socket.parent().unwrap()).unwrap();
+    let _ecoute = std::os::unix::net::UnixListener::bind(&chemins.socket).unwrap();
+    let r = installer(&chemins, &binaire_factice(dossier.path()), 501, true);
+    assert_eq!(r.code, 1, "{}", r.sortie);
+    assert_eq!(
+        r.erreur.trim_end(),
+        "l'app tourne : choisis « Quitter » dans son menu, puis relance install"
+    );
+    assert!(r.appels.is_empty(), "{:?}", r.appels);
+    assert!(!r.sortie.contains("1/5"), "{}", r.sortie);
+    assert!(!chemins.settings_claude.exists());
+    assert!(!chemins.launch_agent.exists());
+    assert!(!chemins.applications.exists());
+    assert!(!chemins.config.exists());
+}
