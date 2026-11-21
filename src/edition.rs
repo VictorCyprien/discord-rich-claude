@@ -87,7 +87,7 @@ pub fn editer(action: &Action, config: &Path, home: Option<&OsStr>, lancer: Lanc
             Decision::ChangerDossier(chemin, dossier) => c.changer_dossier(chemin, &dossier, home),
             Decision::Retirer(chemin) => c.retirer(chemin),
         }?;
-        c.ecrire(config)
+        c.ecrire(config, home)
     });
     match resultat {
         Ok(()) => {
@@ -166,7 +166,7 @@ mod tests {
         let d = dossier(home, nom);
         let mut c = ConfigEditable::lire(config, Some(home.as_os_str())).unwrap();
         c.ajouter(&d, "", Some(home.as_os_str())).unwrap();
-        c.ecrire(config).unwrap();
+        c.ecrire(config, Some(home.as_os_str())).unwrap();
     }
 
     #[test]
@@ -318,7 +318,7 @@ mod tests {
         let b = dossier(home, "B");
         let mut c = lire(&config, home);
         c.renommer("~/A", "Joli").unwrap();
-        c.ecrire(&config).unwrap();
+        c.ecrire(&config, Some(home.as_os_str())).unwrap();
         let (ecrit, _) = jouer(
             &Action::ChangerDossier("~/A".into()),
             &config,
@@ -442,7 +442,7 @@ mod tests {
                 if n == 2 {
                     let mut c = ConfigEditable::lire(&config2, Some(home2.as_os_str())).unwrap();
                     c.ajouter(&b, "", Some(home2.as_os_str())).unwrap();
-                    c.ecrire(&config2).unwrap();
+                    c.ecrire(&config2, Some(home2.as_os_str())).unwrap();
                 }
             },
         );

@@ -177,7 +177,7 @@ pub enum LignesProjets {
 
 pub fn lignes_projets(config: &Path, home: Option<&OsStr>) -> LignesProjets {
     match ConfigEditable::lire(config, home) {
-        Ok(editable) => LignesProjets::Liste(editable.affiches()),
+        Ok(editable) => LignesProjets::Liste(editable.affiches(home)),
         Err(_) => LignesProjets::Invalide,
     }
 }
@@ -216,7 +216,7 @@ struct Interface {
 /// Index d'un projet du sous-menu → son chemin tel qu'écrit dans `config.toml`. Partagé entre
 /// le gestionnaire de clics et la boucle.
 #[cfg(feature = "menu")]
-type Chemins = Arc<std::sync::Mutex<Vec<String>>>;
+type CheminsProjets = Arc<std::sync::Mutex<Vec<String>>>;
 
 /// Vide le sous-menu « Projets » puis le remplit et met à jour `chemins`. En cas d'échec la
 /// liste reste vide : d'anciens chemins ne doivent jamais répondre aux nouveaux identifiants.
@@ -224,7 +224,7 @@ type Chemins = Arc<std::sync::Mutex<Vec<String>>>;
 fn remplir_projets(
     sous_menu: &tray_icon::menu::Submenu,
     lignes: &LignesProjets,
-    chemins_partages: &Chemins,
+    chemins_partages: &CheminsProjets,
 ) -> Result<(), &'static str> {
     use tray_icon::menu::{MenuItem, MenuItemKind, PredefinedMenuItem, Submenu};
 
@@ -249,7 +249,11 @@ fn remplir_projets(
             for (index, projet) in projets.iter().enumerate() {
                 let projet_menu = Submenu::new(texte_menu(&projet.nom), true);
                 projet_menu
-                    .append(&MenuItem::new(texte_menu(&projet.chemin), false, None))
+                    .append(&MenuItem::new(
+                        texte_menu(&projet.chemin_affiche),
+                        false,
+                        None,
+                    ))
                     .map_err(|_| "menu")?;
                 projet_menu
                     .append(&PredefinedMenuItem::separator())
@@ -345,7 +349,7 @@ fn icone_tray(mode: Mode) -> Option<tray_icon::Icon> {
 fn creer_interface(
     mode: Mode,
     config: &Path,
-    chemins: &Chemins,
+    chemins: &CheminsProjets,
 ) -> Result<Interface, &'static str> {
     use tray_icon::TrayIconBuilder;
     use tray_icon::TrayIconEvent;
@@ -427,7 +431,7 @@ pub fn lancer_menu(daemon: Arc<Daemon>, en_marche: EnMarche) -> ! {
     }
     let proxy = boucle.create_proxy();
 
-    let chemins: Chemins = Arc::default();
+    let chemins: CheminsProjets = Arc::default();
     let chemins_clic = Arc::clone(&chemins);
     let proxy_menu = Mutex::new(proxy.clone());
     // Appelé de façon synchrone sur le fil principal : l'index est résolu en chemin ici, avant
@@ -712,6 +716,25 @@ mod tests {
         let noms: Vec<&str> = liste.iter().map(|p| p.nom.as_str()).collect();
         assert_eq!(noms, ["abeille", "zebre"]);
         assert_eq!(liste[0].chemin, "/tmp/abeille");
+    }
+
+    #[test]
+    fn chemin_affiche_sous_le_dossier_personnel() {
+        let home = tempfile::tempdir().unwrap();
+        let p = home.path().join("p");
+        std::fs::create_dir(&p).unwrap();
+        let config = home.path().join("config.toml");
+        std::fs::write(
+            &config,
+            format!("[projets]\nautorises = [\"{}\"]\n", p.display()),
+        )
+        .unwrap();
+        let LignesProjets::Liste(liste) = lignes_projets(&config, Some(home.path().as_os_str()))
+        else {
+            panic!("liste attendue");
+        };
+        assert_eq!(liste[0].chemin_affiche, "~/p");
+        assert_eq!(liste[0].chemin, p.display().to_string());
     }
 
     #[test]

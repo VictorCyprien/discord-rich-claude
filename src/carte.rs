@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
 use crate::chemins::resoudre;
-use crate::config::Config;
+use crate::config::{Config, nom_affiche};
 use crate::sessions::{Registre, activite_affichee};
 
 pub const PROJET_PRIVE: &str = "Projet privé";
@@ -156,13 +156,7 @@ fn nom_projet_avec(
     };
     for autorise in autorises {
         if chemin == *autorise || chemin.ancestors().skip(1).any(|a| a == autorise) {
-            if let Some(a) = alias.get(autorise) {
-                return a.clone();
-            }
-            return autorise
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
+            return nom_affiche(autorise, alias);
         }
     }
     PROJET_PRIVE.to_string()

@@ -1,12 +1,13 @@
 //! Configuration éditable : lecture de `config.toml`, opérations sur la liste
 //! blanche des projets, réécriture complète du fichier. Voir la spec, section 15.
 
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::chemins::resoudre;
-use crate::config::{alias_valide, resoudre_entree, valider};
+use crate::config::{Config, alias_valide, nom_affiche, resoudre_entree, valider};
 use crate::installation::ecrire_fichier_atomique;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,6 +18,7 @@ pub enum ErreurEdition {
     LienSymbolique,
     Ecriture,
     ProjetAbsent,
+    DossierTropLarge,
 }
 
 impl ErreurEdition {
@@ -34,6 +36,9 @@ impl ErreurEdition {
                 Some("config.toml est un lien symbolique : modifie-la à la main.")
             }
             ErreurEdition::Ecriture => Some("Impossible d'écrire config.toml (voir le journal)."),
+            ErreurEdition::DossierTropLarge => {
+                Some("Choisis un dossier de projet, pas la racine ni le dossier personnel.")
+            }
             ErreurEdition::ProjetAbsent => None,
         }
     }
@@ -42,8 +47,10 @@ impl ErreurEdition {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjetAffiche {
     pub nom: String,
-    /// Chemin tel qu'écrit dans `config.toml`.
+    /// Chemin tel qu'écrit dans `config.toml` : la clé d'identité.
     pub chemin: String,
+    /// Chemin à montrer : `~/…` sous le dossier personnel.
+    pub chemin_affiche: String,
 }
 
 #[derive(Clone, Debug)]
@@ -97,8 +104,29 @@ pub fn forme_ecrite(dossier: &Path, home: Option<&OsStr>) -> String {
     sans_final.to_string()
 }
 
-fn valeur_texte(valeur: &str) -> String {
-    toml::Value::String(valeur.to_string()).to_string()
+/// Chaîne TOML de base `"…"`, toujours la même forme : `\\`, `\"` et tout
+/// caractère de contrôle en `\uXXXX`.
+fn cle_toml(s: &str) -> String {
+    let mut sortie = String::with_capacity(s.len() + 2);
+    sortie.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => sortie.push_str("\\\\"),
+            '"' => sortie.push_str("\\\""),
+            c if c.is_control() => sortie.push_str(&format!("\\u{:04X}", c as u32)),
+            c => sortie.push(c),
+        }
+    }
+    sortie.push('"');
+    sortie
+}
+
+/// `/` et le dossier personnel (chemins résolus) sont trop larges pour un projet.
+fn trop_large(resolu: &Path, home: Option<&OsStr>) -> bool {
+    resolu == Path::new("/")
+        || home
+            .and_then(|h| resoudre(Path::new(h), false).ok())
+            .is_some_and(|h| h == resolu)
 }
 
 impl ConfigEditable {
@@ -146,13 +174,23 @@ impl ConfigEditable {
         })
     }
 
-    pub fn affiches(&self) -> Vec<ProjetAffiche> {
+    /// Alias par chemin résolu, pour l'aide commune de nom affiché.
+    fn alias_par_chemin(&self) -> BTreeMap<PathBuf, String> {
+        self.entrees
+            .iter()
+            .filter_map(|e| Some((e.resolu.clone(), e.alias.clone()?)))
+            .collect()
+    }
+
+    pub fn affiches(&self, home: Option<&OsStr>) -> Vec<ProjetAffiche> {
+        let alias = self.alias_par_chemin();
         let mut liste: Vec<ProjetAffiche> = self
             .entrees
             .iter()
             .map(|e| ProjetAffiche {
-                nom: e.alias.clone().unwrap_or_else(|| nom_dossier(&e.resolu)),
+                nom: nom_affiche(&e.resolu, &alias),
                 chemin: e.forme.clone(),
+                chemin_affiche: forme_ecrite(Path::new(&e.forme), home),
             })
             .collect();
         liste.sort_by_key(|p| p.nom.to_lowercase());
@@ -163,7 +201,7 @@ impl ConfigEditable {
         self.entrees
             .iter()
             .find(|e| e.forme == chemin)
-            .map(|e| e.alias.clone().unwrap_or_else(|| nom_dossier(&e.resolu)))
+            .map(|e| nom_affiche(&e.resolu, &self.alias_par_chemin()))
     }
 
     pub fn contient(&self, dossier: &Path, home: Option<&OsStr>) -> bool {
@@ -179,6 +217,9 @@ impl ConfigEditable {
     ) -> Result<(), ErreurEdition> {
         let forme = forme_ecrite(dossier, home);
         let resolu = resoudre_entree(&forme, home).map_err(|_| ErreurEdition::ProjetAbsent)?;
+        if trop_large(&resolu, home) {
+            return Err(ErreurEdition::DossierTropLarge);
+        }
         if self.entrees.iter().any(|e| e.resolu == resolu) {
             return Err(ErreurEdition::DejaPresent);
         }
@@ -207,6 +248,9 @@ impl ConfigEditable {
         let i = self.position(chemin)?;
         let forme = forme_ecrite(nouveau, home);
         let resolu = resoudre_entree(&forme, home).map_err(|_| ErreurEdition::ProjetAbsent)?;
+        if trop_large(&resolu, home) {
+            return Err(ErreurEdition::DossierTropLarge);
+        }
         if self.entrees.iter().any(|e| e.resolu == resolu) {
             return Err(ErreurEdition::DejaPresent);
         }
@@ -258,20 +302,21 @@ impl ConfigEditable {
         } else {
             s.push_str("autorises = [\n");
             for e in &self.entrees {
-                s.push_str(&format!("  {},\n", valeur_texte(&e.forme)));
+                s.push_str(&format!("  {},\n", cle_toml(&e.forme)));
             }
             s.push_str("]\n");
         }
         if self.entrees.iter().any(|e| e.alias.is_some()) {
             s.push_str("\n[projets.alias]\n");
             s.push_str("# Nom affiché sur Discord à la place du nom du dossier.\n");
+            // Une clé répétée rendrait le fichier illisible : une seule ligne par forme.
+            let mut ecrites: Vec<&str> = Vec::new();
             for e in &self.entrees {
-                if let Some(alias) = &e.alias {
-                    s.push_str(&format!(
-                        "{} = {}\n",
-                        valeur_texte(&e.forme),
-                        valeur_texte(alias)
-                    ));
+                if let Some(alias) = &e.alias
+                    && !ecrites.contains(&e.forme.as_str())
+                {
+                    ecrites.push(&e.forme);
+                    s.push_str(&format!("{} = {}\n", cle_toml(&e.forme), cle_toml(alias)));
                 }
             }
         }
@@ -279,19 +324,45 @@ impl ConfigEditable {
     }
 
     /// Réécrit `cible` en entier : atomique, 0600, jamais à travers un lien.
-    pub fn ecrire(&self, cible: &Path) -> Result<(), ErreurEdition> {
+    ///
+    /// Le texte rendu est relu et validé avant d'écrire : s'il ne redonne pas la
+    /// même liste blanche et les mêmes alias, rien n'est écrit.
+    pub fn ecrire(&self, cible: &Path, home: Option<&OsStr>) -> Result<(), ErreurEdition> {
         if fs::symlink_metadata(cible).is_ok_and(|m| m.file_type().is_symlink()) {
             return Err(ErreurEdition::LienSymbolique);
+        }
+        let texte = self.rendre();
+        if !self.relecture_fidele(&texte, home) {
+            log::warn!("config rendue invalide, rien écrit");
+            return Err(ErreurEdition::Ecriture);
         }
         let resultat = match cible.parent() {
             Some(parent) => fs::create_dir_all(parent),
             None => Ok(()),
         }
-        .and_then(|_| ecrire_fichier_atomique(cible, self.rendre().as_bytes(), 0o600));
+        .and_then(|_| ecrire_fichier_atomique(cible, texte.as_bytes(), 0o600));
         resultat.map_err(|e| {
             log::warn!("écriture de config.toml impossible : {:?}", e.kind());
             ErreurEdition::Ecriture
         })
+    }
+}
+
+impl ConfigEditable {
+    fn relecture_fidele(&self, texte: &str, home: Option<&OsStr>) -> bool {
+        let Ok(table) = texte.parse::<toml::Table>() else {
+            return false;
+        };
+        let Ok(Config {
+            projets_autorises,
+            alias,
+            ..
+        }) = valider(&table, home)
+        else {
+            return false;
+        };
+        let attendus: Vec<&PathBuf> = self.entrees.iter().map(|e| &e.resolu).collect();
+        projets_autorises.iter().eq(attendus) && alias == self.alias_par_chemin()
     }
 }
 
@@ -411,7 +482,7 @@ autorises = [
         assert!(rendu.contains("client_id = 123\n"));
         assert!(rendu.contains("inactif_apres_min = 10.5\n"));
         assert!(rendu.contains("  \"~/p\",\n"));
-        assert_eq!(c.affiches()[0].chemin, "~/p");
+        assert_eq!(c.affiches(None)[0].chemin, "~/p");
     }
 
     #[test]
@@ -463,7 +534,7 @@ autorises = [
         c.ajouter(&reel, "", h).unwrap();
         assert!(c.contient(&lien, h));
         assert_eq!(c.ajouter(&lien, "", h), Err(ErreurEdition::DejaPresent));
-        assert_eq!(c.affiches().len(), 1);
+        assert_eq!(c.affiches(None).len(), 1);
     }
 
     #[test]
@@ -562,7 +633,7 @@ autorises = [
         c.ajouter(&dossier(home.path(), "b"), "", h).unwrap();
         c.ajouter(&dossier(home.path(), "A"), "", h).unwrap();
         c.ajouter(&dossier(home.path(), "c"), "Zed", h).unwrap();
-        let noms: Vec<String> = c.affiches().into_iter().map(|p| p.nom).collect();
+        let noms: Vec<String> = c.affiches(None).into_iter().map(|p| p.nom).collect();
         assert_eq!(noms, ["A", "b", "Zed"]);
     }
 
@@ -570,15 +641,15 @@ autorises = [
     fn aller_retour_caracteres_speciaux() {
         let home = TempDir::new().unwrap();
         let h = Some(home.path().as_os_str());
-        let dossier = dossier(home.path(), "Mon \"dossier\" l'été");
-        let alias = "Mon \"Projet\" \\ é🦀 «x»";
+        let dossier = dossier(home.path(), "Mon \"dossier\" l'été \\ 🦀 «x»");
+        let alias = "Mon \"Projet\" l'a \\ é🦀 «x»";
         let mut c = vide();
         c.ajouter(&dossier, alias, h).unwrap();
         let cible = home.path().join("sortie.toml");
-        c.ecrire(&cible).unwrap();
+        c.ecrire(&cible, h).unwrap();
 
         let relu = ConfigEditable::lire(&cible, h).unwrap();
-        assert_eq!(relu.affiches()[0].nom, alias);
+        assert_eq!(relu.affiches(None)[0].nom, alias);
 
         let texte = fs::read_to_string(&cible).unwrap();
         let config = valider(&texte.parse::<toml::Table>().unwrap(), h).unwrap();
@@ -588,13 +659,120 @@ autorises = [
             std::slice::from_ref(&resolu)
         );
         assert_eq!(config.alias.get(&resolu).map(String::as_str), Some(alias));
+
+        let sous = dossier.join("src");
+        fs::create_dir_all(&sous).unwrap();
+        assert_eq!(
+            crate::carte::nom_projet(sous.to_str(), &config.projets_autorises, &config.alias),
+            alias
+        );
+    }
+
+    #[test]
+    fn doublon_dans_autorises_reste_lisible_apres_ajout() {
+        let home = TempDir::new().unwrap();
+        let h = Some(home.path().as_os_str());
+        let p = dossier(home.path(), "p");
+        let q = dossier(home.path(), "q");
+        let abs = p.display();
+        let mut c = lire_texte(
+            home.path(),
+            &format!(
+                "[projets]\nautorises = [\"{abs}\", \"{abs}\"]\n[projets.alias]\n\"{abs}\" = \"Pp\"\n"
+            ),
+        )
+        .unwrap();
+        c.ajouter(&q, "", h).unwrap();
+        let cible = home.path().join("sortie.toml");
+        c.ecrire(&cible, h).unwrap();
+        let texte = fs::read_to_string(&cible).unwrap();
+        assert_eq!(texte.matches("Pp").count(), 1, "{texte}");
+        let relu = ConfigEditable::lire(&cible, h).unwrap();
+        assert_eq!(relu.affiches(None).len(), 3);
+    }
+
+    #[test]
+    fn cle_avec_antislash_apostrophe_et_saut_de_ligne() {
+        let home = TempDir::new().unwrap();
+        let h = Some(home.path().as_os_str());
+        let mut c = vide();
+        c.ajouter(&dossier(home.path(), "a\\b'c"), "Zed", h)
+            .unwrap();
+        let table = c.rendre().parse::<toml::Table>().unwrap();
+        let config = valider(&table, h).unwrap();
+        assert_eq!(config.alias.values().collect::<Vec<_>>(), ["Zed"]);
+
+        let mut c = avec(&[("/p/a\nb\tc\u{7f}", Some("N"))]);
+        c.entrees[0].resolu = PathBuf::from("/p/a\nb\tc\u{7f}");
+        let rendu = c.rendre();
+        assert!(!rendu.contains("a\nb"), "{rendu}");
+        let table = rendu.parse::<toml::Table>().unwrap();
+        let config = valider(&table, None).unwrap();
+        assert_eq!(config.alias.len(), 1);
+    }
+
+    #[test]
+    fn cle_toml_echappe_tout() {
+        assert_eq!(
+            cle_toml("a\\b\"c'd\n\u{1}"),
+            "\"a\\\\b\\\"c'd\\u000A\\u0001\""
+        );
+    }
+
+    #[test]
+    fn ecrire_refuse_une_config_rendue_invalide() {
+        let tmp = TempDir::new().unwrap();
+        let cible = tmp.path().join("config.toml");
+        // Forme relative : la relecture la refuse.
+        let c = avec(&[("relatif", None)]);
+        assert_eq!(c.ecrire(&cible, None), Err(ErreurEdition::Ecriture));
+        assert!(!cible.exists());
+    }
+
+    #[test]
+    fn ecrire_refuse_si_la_relecture_differe() {
+        let tmp = TempDir::new().unwrap();
+        let cible = tmp.path().join("config.toml");
+        let mut c = avec(&[("/p/a", None)]);
+        c.entrees[0].resolu = PathBuf::from("/p/autre");
+        assert_eq!(c.ecrire(&cible, None), Err(ErreurEdition::Ecriture));
+        assert!(!cible.exists());
+    }
+
+    #[test]
+    fn racine_et_dossier_personnel_refuses() {
+        let home = TempDir::new().unwrap();
+        let h = Some(home.path().as_os_str());
+        let mut c = vide();
+        assert_eq!(
+            c.ajouter(Path::new("/"), "", h),
+            Err(ErreurEdition::DossierTropLarge)
+        );
+        assert_eq!(
+            c.ajouter(home.path(), "", h),
+            Err(ErreurEdition::DossierTropLarge)
+        );
+        c.ajouter(&dossier(home.path(), "a"), "", h).unwrap();
+        assert_eq!(
+            c.changer_dossier("~/a", Path::new("/"), h),
+            Err(ErreurEdition::DossierTropLarge)
+        );
+        assert_eq!(
+            c.changer_dossier("~/a", home.path(), h),
+            Err(ErreurEdition::DossierTropLarge)
+        );
+        assert_eq!(c.affiches(None).len(), 1);
+        assert_eq!(
+            ErreurEdition::DossierTropLarge.message(),
+            Some("Choisis un dossier de projet, pas la racine ni le dossier personnel.")
+        );
     }
 
     #[test]
     fn ecrire_cree_le_parent_en_0600() {
         let tmp = TempDir::new().unwrap();
         let cible = tmp.path().join("a/b/config.toml");
-        avec(&[("/p/a", None)]).ecrire(&cible).unwrap();
+        avec(&[("/p/a", None)]).ecrire(&cible, None).unwrap();
         assert_eq!(
             fs::metadata(&cible).unwrap().permissions().mode() & 0o777,
             0o600
@@ -608,7 +786,7 @@ autorises = [
         let cible = tmp.path().join("config.toml");
         fs::write(&cible, "ancien").unwrap();
         fs::set_permissions(&cible, fs::Permissions::from_mode(0o644)).unwrap();
-        vide().ecrire(&cible).unwrap();
+        vide().ecrire(&cible, None).unwrap();
         assert_eq!(
             fs::metadata(&cible).unwrap().permissions().mode() & 0o777,
             0o600
@@ -622,7 +800,10 @@ autorises = [
         fs::write(&vrai, "intact").unwrap();
         let lien = tmp.path().join("config.toml");
         symlink(&vrai, &lien).unwrap();
-        assert_eq!(vide().ecrire(&lien), Err(ErreurEdition::LienSymbolique));
+        assert_eq!(
+            vide().ecrire(&lien, None),
+            Err(ErreurEdition::LienSymbolique)
+        );
         assert_eq!(fs::read_to_string(&vrai).unwrap(), "intact");
     }
 }

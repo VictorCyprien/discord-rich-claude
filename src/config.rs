@@ -59,7 +59,10 @@ pub fn charger(chemin: &Path) -> Config {
     let brut = match texte.parse::<toml::Table>() {
         Ok(t) => t,
         Err(e) => {
-            log::warn!("config illisible, rien ne sera affiché : {}", e.message());
+            log::warn!(
+                "config illisible, rien ne sera affiché : {}",
+                description_toml_invalide(&texte, &e)
+            );
             return Config::default();
         }
     };
@@ -71,6 +74,34 @@ pub fn charger(chemin: &Path) -> Config {
             Config::default()
         }
     }
+}
+
+/// Texte de journal pour un TOML illisible : jamais le message du parseur, qui
+/// peut citer le contenu (un chemin, un alias) ; seulement la ligne.
+fn description_toml_invalide(texte: &str, e: &toml::de::Error) -> String {
+    match e.span() {
+        Some(span) => {
+            let debut = span.start.min(texte.len());
+            let ligne = texte.as_bytes()[..debut]
+                .iter()
+                .filter(|&&o| o == b'\n')
+                .count()
+                + 1;
+            format!("TOML invalide (ligne {ligne})")
+        }
+        None => "TOML invalide".to_string(),
+    }
+}
+
+/// Nom d'un projet : son alias, sinon le dernier élément du chemin résolu.
+/// Sans entrée-sortie : `resolu` l'est déjà.
+pub fn nom_affiche(resolu: &Path, alias: &BTreeMap<PathBuf, String>) -> String {
+    alias.get(resolu).cloned().unwrap_or_else(|| {
+        resolu
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    })
 }
 
 pub(crate) fn valider(brut: &toml::Table, home: Option<&OsStr>) -> Result<Config, String> {
@@ -333,6 +364,15 @@ mod tests {
     use super::*;
     use std::os::unix::fs::{PermissionsExt, symlink};
     use std::time::Duration;
+
+    #[test]
+    fn toml_invalide_journalise_la_ligne_sans_le_contenu() {
+        let texte = "client_id = \"1\"\n[projets]\nautorises = [\"/secret/prive\" \"x\"]\n";
+        let e = texte.parse::<toml::Table>().unwrap_err();
+        let d = description_toml_invalide(texte, &e);
+        assert_eq!(d, "TOML invalide (ligne 3)");
+        assert!(!d.contains("secret"));
+    }
 
     fn ecrire(chemin: &Path, texte: &str) -> PathBuf {
         std::fs::write(chemin, texte).unwrap();
