@@ -284,6 +284,7 @@ Ajouts de la section 14 : Intel et binaire universel, notarisation, widget Widge
 - Comportement identique à Python : `config.toml` (mêmes clés), chemin du socket, routes `POST /event` et `GET /etat`, en-tête `X-Claude-Pid`, liste fermée de champs (7.3), libellés (section 5), commande de hook (section 8), journal.
 - Portage unité par unité avec `rust-anything` : la suite pytest et les cas enregistrés servent de référence, une unité n'est finie que si sa preuve passe. Le Python reste jusqu'à parité (tests d'intégration socket et `curl` repris en Rust), puis il est supprimé.
 - Les règles de `CLAUDE.md` valent pour le Rust : `sessions` et `carte` sans entrée-sortie, tests sans Discord réel, sans vrais chemins utilisateur, sans vrai `launchctl`.
+- Python supprimé le 2026-11-21.
 
 ### 14.2 États
 
