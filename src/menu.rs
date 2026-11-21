@@ -3,9 +3,12 @@
 //! La logique pure (entrées, icônes) est testée ; la boucle d'interface, elle, est validée à
 //! la main.
 
+use std::ffi::OsStr;
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::daemon::{Daemon, EnMarche, Mode};
+use crate::projets::{ConfigEditable, ProjetAffiche};
 
 /// Une ligne du menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +79,55 @@ pub fn icone(mode: Mode) -> Vec<u8> {
     rgba
 }
 
+pub const ID_AJOUTER: &str = "projets:ajouter";
+
+/// Action d'un projet du sous-menu « Projets ».
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ActionMenu {
+    Renommer,
+    ChangerDossier,
+    Retirer,
+}
+
+/// Identifiant d'une entrée de projet : `projets:<action>:<index>`.
+pub fn id_projet(action: ActionMenu, index: usize) -> String {
+    let nom = match action {
+        ActionMenu::Renommer => "renommer",
+        ActionMenu::ChangerDossier => "changer",
+        ActionMenu::Retirer => "retirer",
+    };
+    format!("projets:{nom}:{index}")
+}
+
+/// Inverse de `id_projet` ; `None` pour tout autre identifiant.
+pub fn lire_id_projet(id: &str) -> Option<(ActionMenu, usize)> {
+    let reste = id.strip_prefix("projets:")?;
+    let (nom, index) = reste.split_once(':')?;
+    let action = match nom {
+        "renommer" => ActionMenu::Renommer,
+        "changer" => ActionMenu::ChangerDossier,
+        "retirer" => ActionMenu::Retirer,
+        _ => return None,
+    };
+    Some((action, index.parse().ok()?))
+}
+
+/// Ce que le sous-menu « Projets » affiche.
+#[derive(Debug, PartialEq, Eq)]
+pub enum LignesProjets {
+    /// Les projets, déjà triés ; vide : « Aucun projet ».
+    Liste(Vec<ProjetAffiche>),
+    /// `config.toml` illisible, invalide ou lien symbolique.
+    Invalide,
+}
+
+pub fn lignes_projets(config: &Path, home: Option<&OsStr>) -> LignesProjets {
+    match ConfigEditable::lire(config, home) {
+        Ok(editable) => LignesProjets::Liste(editable.affiches()),
+        Err(_) => LignesProjets::Invalide,
+    }
+}
+
 #[cfg(feature = "menu")]
 const ID_ALLUMER: &str = "allumer";
 #[cfg(feature = "menu")]
@@ -92,6 +144,8 @@ enum Evt {
     Clic(String),
     /// Un changement de mode vient de se terminer : redessiner.
     ModeChange,
+    /// La config a été rechargée : reconstruire le sous-menu « Projets ».
+    ProjetsChanges,
     /// « Quitter », SIGTERM ou SIGINT.
     Quitter,
 }
@@ -100,6 +154,119 @@ enum Evt {
 struct Interface {
     tray: tray_icon::TrayIcon,
     lignes: Vec<tray_icon::menu::MenuItem>,
+    projets: tray_icon::menu::Submenu,
+    /// Index d'un projet du sous-menu → son chemin tel qu'écrit dans `config.toml`.
+    chemins: Vec<String>,
+}
+
+/// Vide le sous-menu « Projets » puis le remplit ; rend les chemins, dans l'ordre des index.
+#[cfg(feature = "menu")]
+fn remplir_projets(
+    sous_menu: &tray_icon::menu::Submenu,
+    lignes: &LignesProjets,
+) -> Result<Vec<String>, &'static str> {
+    use tray_icon::menu::{MenuItem, MenuItemKind, PredefinedMenuItem, Submenu};
+
+    for item in sous_menu.items() {
+        match item {
+            MenuItemKind::MenuItem(i) => sous_menu.remove(&i),
+            MenuItemKind::Submenu(i) => sous_menu.remove(&i),
+            MenuItemKind::Predefined(i) => sous_menu.remove(&i),
+            MenuItemKind::Check(i) => sous_menu.remove(&i),
+            MenuItemKind::Icon(i) => sous_menu.remove(&i),
+        }
+        .map_err(|_| "menu")?;
+    }
+    let mut chemins = Vec::new();
+    match lignes {
+        LignesProjets::Liste(projets) if !projets.is_empty() => {
+            for (index, projet) in projets.iter().enumerate() {
+                let projet_menu = Submenu::new(&projet.nom, true);
+                projet_menu
+                    .append(&MenuItem::new(&projet.chemin, false, None))
+                    .map_err(|_| "menu")?;
+                projet_menu
+                    .append(&PredefinedMenuItem::separator())
+                    .map_err(|_| "menu")?;
+                for (action, libelle) in [
+                    (ActionMenu::Renommer, "Renommer…"),
+                    (ActionMenu::ChangerDossier, "Changer le dossier…"),
+                    (ActionMenu::Retirer, "Retirer…"),
+                ] {
+                    let ligne = MenuItem::with_id(id_projet(action, index), libelle, true, None);
+                    projet_menu.append(&ligne).map_err(|_| "menu")?;
+                }
+                sous_menu.append(&projet_menu).map_err(|_| "menu")?;
+                chemins.push(projet.chemin.clone());
+            }
+        }
+        LignesProjets::Liste(_) => sous_menu
+            .append(&MenuItem::new("Aucun projet", false, None))
+            .map_err(|_| "menu")?,
+        LignesProjets::Invalide => sous_menu
+            .append(&MenuItem::new("config.toml invalide", false, None))
+            .map_err(|_| "menu")?,
+    }
+    sous_menu
+        .append(&PredefinedMenuItem::separator())
+        .map_err(|_| "menu")?;
+    sous_menu
+        .append(&MenuItem::with_id(
+            ID_AJOUTER,
+            "Ajouter un projet…",
+            true,
+            None,
+        ))
+        .map_err(|_| "menu")?;
+    Ok(chemins)
+}
+
+/// Remet à `false` le drapeau d'édition, même si l'édition panique.
+#[cfg(feature = "menu")]
+struct FinEdition;
+
+#[cfg(feature = "menu")]
+impl Drop for FinEdition {
+    fn drop(&mut self) {
+        EDITION_EN_COURS.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Une seule édition de projet à la fois : un clic pendant un dialogue est ignoré.
+#[cfg(feature = "menu")]
+static EDITION_EN_COURS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Lance l'édition sur un fil à part : les dialogues bloquent jusqu'à la réponse.
+#[cfg(feature = "menu")]
+fn lancer_edition(daemon: &Arc<Daemon>, action: crate::edition::Action) {
+    use std::sync::atomic::Ordering;
+
+    if EDITION_EN_COURS
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+    let daemon = Arc::clone(daemon);
+    let lance = std::thread::Builder::new()
+        .name("édition".into())
+        .spawn(move || {
+            let _fin = FinEdition;
+            let home = std::env::var_os("HOME");
+            let mut lanceur = crate::dialogues::lanceur_reel;
+            if crate::edition::editer(
+                &action,
+                &daemon.chemin_config(),
+                home.as_deref(),
+                &mut lanceur,
+            ) {
+                daemon.recharger_config();
+            }
+        });
+    if lance.is_err() {
+        log::error!("fil d'édition impossible");
+        EDITION_EN_COURS.store(false, Ordering::SeqCst);
+    }
 }
 
 #[cfg(feature = "menu")]
@@ -108,10 +275,10 @@ fn icone_tray(mode: Mode) -> Option<tray_icon::Icon> {
 }
 
 #[cfg(feature = "menu")]
-fn creer_interface(mode: Mode) -> Result<Interface, &'static str> {
+fn creer_interface(mode: Mode, config: &Path) -> Result<Interface, &'static str> {
     use tray_icon::TrayIconBuilder;
     use tray_icon::TrayIconEvent;
-    use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
+    use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 
     let ids = [
         None,
@@ -122,12 +289,18 @@ fn creer_interface(mode: Mode) -> Result<Interface, &'static str> {
     ];
     let menu = Menu::new();
     let mut lignes = Vec::new();
+    let projets = Submenu::new("Projets", true);
+    let home = std::env::var_os("HOME");
+    let chemins = remplir_projets(&projets, &lignes_projets(config, home.as_deref()))?;
     for (entree, id) in entrees(mode).iter().zip(ids) {
         let ligne = match id {
             Some(id) => MenuItem::with_id(id, entree.libelle, entree.active, None),
             None => MenuItem::new(entree.libelle, entree.active, None),
         };
         if id == Some(ID_QUITTER) {
+            menu.append(&PredefinedMenuItem::separator())
+                .map_err(|_| "menu")?;
+            menu.append(&projets).map_err(|_| "menu")?;
             menu.append(&PredefinedMenuItem::separator())
                 .map_err(|_| "menu")?;
         }
@@ -143,7 +316,12 @@ fn creer_interface(mode: Mode) -> Result<Interface, &'static str> {
         .with_tooltip("Discord Rich Claude")
         .build()
         .map_err(|_| "icône de barre de menus")?;
-    Ok(Interface { tray, lignes })
+    Ok(Interface {
+        tray,
+        lignes,
+        projets,
+        chemins,
+    })
 }
 
 #[cfg(feature = "menu")]
@@ -164,6 +342,7 @@ fn rafraichir(interface: &Interface, mode: Mode) {
 /// un fil à part, qui prévient la boucle par un événement utilisateur une fois fini.
 #[cfg(feature = "menu")]
 pub fn lancer_menu(daemon: Arc<Daemon>, en_marche: EnMarche) -> ! {
+    use crate::edition::Action;
     use std::sync::Mutex;
     use tao::event::{Event, StartCause};
     use tao::event_loop::{ControlFlow, EventLoopBuilder};
@@ -199,17 +378,44 @@ pub fn lancer_menu(daemon: Arc<Daemon>, en_marche: EnMarche) -> ! {
         *flux = ControlFlow::Wait;
         match evenement {
             // Sur macOS, l'icône se crée dans `Init`, comme le recommande tray-icon.
-            Event::NewEvents(StartCause::Init) => match creer_interface(daemon.mode()) {
-                Ok(i) => interface = Some(i),
-                Err(genre) => {
-                    log::error!("barre de menus impossible ({genre})");
-                    if let Some(m) = en_marche.take() {
-                        m.arreter();
+            Event::NewEvents(StartCause::Init) => {
+                match creer_interface(daemon.mode(), &daemon.chemin_config()) {
+                    Ok(i) => {
+                        interface = Some(i);
+                        // Le rappel part du fil de contrôle ou du fil d'édition : il ne fait
+                        // qu'envoyer un événement à la boucle.
+                        let proxy_projets = Mutex::new(proxy.clone());
+                        daemon.sur_config_changee(Box::new(move || {
+                            if let Ok(proxy) = proxy_projets.lock() {
+                                let _ = proxy.send_event(Evt::ProjetsChanges);
+                            }
+                        }));
                     }
-                    std::process::exit(1);
+                    Err(genre) => {
+                        log::error!("barre de menus impossible ({genre})");
+                        if let Some(m) = en_marche.take() {
+                            m.arreter();
+                        }
+                        std::process::exit(1);
+                    }
                 }
-            },
+            }
             Event::UserEvent(Evt::Clic(id)) => {
+                if id == ID_AJOUTER {
+                    lancer_edition(&daemon, Action::Ajouter);
+                } else if let Some((action, index)) = lire_id_projet(&id) {
+                    let chemin = interface.as_ref().and_then(|i| i.chemins.get(index));
+                    if let Some(chemin) = chemin.cloned() {
+                        lancer_edition(
+                            &daemon,
+                            match action {
+                                ActionMenu::Renommer => Action::Renommer(chemin),
+                                ActionMenu::ChangerDossier => Action::ChangerDossier(chemin),
+                                ActionMenu::Retirer => Action::Retirer(chemin),
+                            },
+                        );
+                    }
+                }
                 let mode = match id.as_str() {
                     ID_ALLUMER => Some(Mode::Allume),
                     ID_PAUSE => Some(Mode::Pause),
@@ -231,6 +437,16 @@ pub fn lancer_menu(daemon: Arc<Daemon>, en_marche: EnMarche) -> ! {
             Event::UserEvent(Evt::ModeChange) => {
                 if let Some(i) = &interface {
                     rafraichir(i, daemon.mode());
+                }
+            }
+            Event::UserEvent(Evt::ProjetsChanges) => {
+                if let Some(i) = &mut interface {
+                    let home = std::env::var_os("HOME");
+                    let lignes = lignes_projets(&daemon.chemin_config(), home.as_deref());
+                    match remplir_projets(&i.projets, &lignes) {
+                        Ok(chemins) => i.chemins = chemins,
+                        Err(genre) => log::error!("sous-menu Projets impossible ({genre})"),
+                    }
                 }
             }
             Event::UserEvent(Evt::Quitter) => {
@@ -321,5 +537,65 @@ mod tests {
         assert_eq!(alpha(Mode::Allume, 18, 18), 255);
         assert_eq!(alpha(Mode::Arrete, 18, 18), 0);
         assert_eq!(alpha(Mode::Pause, 18, 18), 0);
+    }
+
+    #[test]
+    fn id_projet_aller_retour() {
+        for action in [
+            ActionMenu::Renommer,
+            ActionMenu::ChangerDossier,
+            ActionMenu::Retirer,
+        ] {
+            for index in [0, 41] {
+                assert_eq!(
+                    lire_id_projet(&id_projet(action, index)),
+                    Some((action, index))
+                );
+            }
+        }
+        assert_eq!(id_projet(ActionMenu::Renommer, 3), "projets:renommer:3");
+        assert_eq!(
+            id_projet(ActionMenu::ChangerDossier, 3),
+            "projets:changer:3"
+        );
+        assert_eq!(id_projet(ActionMenu::Retirer, 3), "projets:retirer:3");
+    }
+
+    #[test]
+    fn lire_id_projet_refuse_les_autres_ids() {
+        for id in [
+            ID_AJOUTER,
+            "projets:renommer:",
+            "projets:renommer:x",
+            "projets:inconnu:1",
+            "allumer",
+        ] {
+            assert_eq!(lire_id_projet(id), None, "{id}");
+        }
+    }
+
+    #[test]
+    fn lignes_projets_triees() {
+        let dossier = tempfile::tempdir().unwrap();
+        let config = dossier.path().join("config.toml");
+        std::fs::write(
+            &config,
+            "[projets]\nautorises = [\"/tmp/zebre\", \"/tmp/abeille\"]\n",
+        )
+        .unwrap();
+        let LignesProjets::Liste(liste) = lignes_projets(&config, None) else {
+            panic!("liste attendue");
+        };
+        let noms: Vec<&str> = liste.iter().map(|p| p.nom.as_str()).collect();
+        assert_eq!(noms, ["abeille", "zebre"]);
+        assert_eq!(liste[0].chemin, "/tmp/abeille");
+    }
+
+    #[test]
+    fn lignes_projets_config_invalide() {
+        let dossier = tempfile::tempdir().unwrap();
+        let config = dossier.path().join("config.toml");
+        std::fs::write(&config, "ceci n'est pas = [du toml").unwrap();
+        assert_eq!(lignes_projets(&config, None), LignesProjets::Invalide);
     }
 }

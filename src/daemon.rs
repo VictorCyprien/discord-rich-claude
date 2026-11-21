@@ -62,6 +62,8 @@ pub fn horloge_systeme() -> Box<dyn Fn() -> f64 + Send + Sync> {
     })
 }
 
+type Rappel = Box<dyn Fn() + Send + Sync>;
+
 type ParSession = HashMap<String, (Option<String>, i64)>;
 
 struct EtatDaemon {
@@ -82,6 +84,9 @@ pub struct Daemon {
     projets_claude: PathBuf,
     pid_vivant: Box<dyn Fn(i32) -> bool + Send + Sync>,
     horloge: Box<dyn Fn() -> f64 + Send + Sync>,
+    /// Appelé quand la config vient d'être rechargée. Verrou de dernier rang : jamais pris
+    /// avec un autre verrou du daemon, et le rappel s'exécute sans l'état.
+    sur_config_changee: Mutex<Option<Rappel>>,
 }
 
 fn verrou<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -112,11 +117,38 @@ impl Daemon {
             projets_claude,
             pid_vivant,
             horloge,
+            sur_config_changee: Mutex::new(None),
         })
     }
 
     pub fn mode(&self) -> Mode {
         verrou(&self.etat).mode
+    }
+
+    pub fn chemin_config(&self) -> PathBuf {
+        verrou(&self.etat).config.chemin.clone()
+    }
+
+    /// Recharge la config si le fichier a changé, puis prévient le rappel. Rend `true` si
+    /// elle a changé.
+    pub fn recharger_config(&self) -> bool {
+        let change = verrou(&self.etat).config.recharger_si_change();
+        if change {
+            self.prevenir_config_changee();
+        }
+        change
+    }
+
+    /// Enregistre le rappel appelé après chaque rechargement de la config.
+    pub fn sur_config_changee(&self, rappel: Rappel) {
+        *verrou(&self.sur_config_changee) = Some(rappel);
+    }
+
+    /// Appelle le rappel, sans tenir d'autre verrou que celui du rappel lui-même.
+    fn prevenir_config_changee(&self) {
+        if let Some(rappel) = verrou(&self.sur_config_changee).as_ref() {
+            rappel();
+        }
     }
 
     /// `Debug` des sessions, pour les tests de confidentialité.
@@ -188,7 +220,7 @@ impl Daemon {
     /// d'état ni pendant la lecture des transcripts ni avec le verrou du suivi.
     pub fn controler(&self) {
         // 1. sous le verrou d'état
-        let (transcripts, minuit) = {
+        let (transcripts, minuit, config_changee) = {
             let mut etat = verrou(&self.etat);
             let maintenant = (self.horloge)();
             let change = etat.config.recharger_si_change();
@@ -200,6 +232,10 @@ impl Daemon {
             etat.premier_controle = false;
             // À l'arrêt : ni purge, ni lecture de transcript, ni calcul de tokens.
             if etat.mode == Mode::Arrete {
+                drop(etat);
+                if change {
+                    self.prevenir_config_changee();
+                }
                 return;
             }
             let inactif_s = etat.config.valeur.inactif_apres_min * 60.0;
@@ -216,8 +252,11 @@ impl Daemon {
                         .map(|t| (sid.clone(), PathBuf::from(t)))
                 })
                 .collect();
-            (transcripts, minuit_local(maintenant))
+            (transcripts, minuit_local(maintenant), change)
         };
+        if config_changee {
+            self.prevenir_config_changee();
+        }
         // 2. hors du verrou d'état : lecture disque
         let (par_session, tokens_jour) = {
             let mut suivi = verrou(&self.suivi);
@@ -596,5 +635,85 @@ mod tests {
         for l in erreurs.iter().chain(infos.iter()) {
             assert!(!l.contains("SECRET") && !l.contains("/chemin/"));
         }
+    }
+
+    struct ClientNul;
+
+    impl crate::presence::ClientDiscord for ClientNul {
+        fn connecter(&mut self) -> Result<(), crate::presence::ErreurDiscord> {
+            Ok(())
+        }
+        fn publier(&mut self, _: &Carte) -> Result<(), crate::presence::ErreurDiscord> {
+            Ok(())
+        }
+        fn effacer(&mut self) -> Result<(), crate::presence::ErreurDiscord> {
+            Ok(())
+        }
+        fn fermer(&mut self) -> Result<(), crate::presence::ErreurDiscord> {
+            Ok(())
+        }
+    }
+
+    /// Daemon factice sur une config temporaire ; `(dossier, chemin de la config, daemon)`.
+    fn daemon_avec_config() -> (tempfile::TempDir, PathBuf, Arc<Daemon>) {
+        let dossier = tempfile::tempdir().unwrap();
+        let config = dossier.path().join("config.toml");
+        std::fs::write(&config, "client_id = \"1\"\n").unwrap();
+        let daemon = Daemon::new(
+            ConfigSurveillee::new(config.clone()),
+            Presence::new(
+                Box::new(|_| Box::new(ClientNul)),
+                15.0,
+                15.0,
+                Box::new(|| 0.0),
+            ),
+            SuiviTokens::new(dossier.path().join("projets")),
+            dossier.path().join("projets"),
+            Box::new(|_| true),
+            Box::new(|| 0.0),
+        );
+        (dossier, config, daemon)
+    }
+
+    fn compteur_de_rappels(daemon: &Daemon) -> Arc<std::sync::atomic::AtomicUsize> {
+        let compte = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let c = Arc::clone(&compte);
+        daemon.sur_config_changee(Box::new(move || {
+            c.fetch_add(1, Ordering::SeqCst);
+        }));
+        compte
+    }
+
+    #[test]
+    fn rappel_appele_quand_la_config_change_au_controle() {
+        let (_dossier, config, daemon) = daemon_avec_config();
+        let compte = compteur_de_rappels(&daemon);
+        std::fs::write(&config, "client_id = \"2\"\n").unwrap();
+        daemon.controler();
+        assert_eq!(compte.load(Ordering::SeqCst), 1);
+        daemon.controler();
+        assert_eq!(compte.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn rappel_appele_aussi_en_mode_arrete() {
+        let (_dossier, config, daemon) = daemon_avec_config();
+        let compte = compteur_de_rappels(&daemon);
+        daemon.changer_mode(Mode::Arrete);
+        std::fs::write(&config, "client_id = \"2\"\n").unwrap();
+        daemon.controler();
+        assert_eq!(compte.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn recharger_config_sans_changement_rend_faux() {
+        let (_dossier, config, daemon) = daemon_avec_config();
+        let compte = compteur_de_rappels(&daemon);
+        assert!(!daemon.recharger_config());
+        assert_eq!(compte.load(Ordering::SeqCst), 0);
+        assert_eq!(daemon.chemin_config(), config);
+        std::fs::write(&config, "client_id = \"2\"\n").unwrap();
+        assert!(daemon.recharger_config());
+        assert_eq!(compte.load(Ordering::SeqCst), 1);
     }
 }
