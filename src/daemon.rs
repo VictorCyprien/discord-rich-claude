@@ -132,9 +132,19 @@ impl Daemon {
     /// Recharge la config si le fichier a changé, puis prévient le rappel. Rend `true` si
     /// elle a changé.
     pub fn recharger_config(&self) -> bool {
-        let change = verrou(&self.etat).config.recharger_si_change();
+        let change = Self::recharger_sous_verrou(&mut verrou(&self.etat));
         if change {
             self.prevenir_config_changee();
+        }
+        change
+    }
+
+    /// Recharge la config (sous le verrou d'état) ; si elle a changé et que `client_id`
+    /// manque, journalise l'erreur de la spec 7.1.
+    fn recharger_sous_verrou(etat: &mut EtatDaemon) -> bool {
+        let change = etat.config.recharger_si_change();
+        if change && etat.config.valeur.client_id.is_none() {
+            log::error!("client_id absent : pas de connexion à Discord");
         }
         change
     }
@@ -223,10 +233,10 @@ impl Daemon {
         let (transcripts, minuit, config_changee) = {
             let mut etat = verrou(&self.etat);
             let maintenant = (self.horloge)();
-            let change = etat.config.recharger_si_change();
-            // Spec 7.1 : client_id absent → erreur dans le log, une fois au démarrage,
-            // puis seulement si un rechargement confirme qu'il manque toujours.
-            if etat.config.valeur.client_id.is_none() && (etat.premier_controle || change) {
+            let change = Self::recharger_sous_verrou(&mut etat);
+            // Spec 7.1 : client_id absent → erreur dans le log, une fois au démarrage
+            // (un rechargement est déjà journalisé par `recharger_sous_verrou`).
+            if etat.config.valeur.client_id.is_none() && etat.premier_controle && !change {
                 log::error!("client_id absent : pas de connexion à Discord");
             }
             etat.premier_controle = false;
@@ -715,5 +725,12 @@ mod tests {
         std::fs::write(&config, "client_id = \"2\"\n").unwrap();
         assert!(daemon.recharger_config());
         assert_eq!(compte.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn recharger_config_sans_client_id_garde_le_comportement() {
+        let (_dossier, config, daemon) = daemon_avec_config();
+        std::fs::write(&config, "inactif_apres_min = 5\n").unwrap();
+        assert!(daemon.recharger_config());
     }
 }

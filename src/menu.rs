@@ -112,6 +112,11 @@ pub fn lire_id_projet(id: &str) -> Option<(ActionMenu, usize)> {
     Some((action, index.parse().ok()?))
 }
 
+/// Texte affiché par muda : sous macOS il retire chaque `&` (mnémonique) et lit `&&` comme `&`.
+pub fn texte_menu(s: &str) -> String {
+    s.replace('&', "&&")
+}
+
 /// Ce que le sous-menu « Projets » affiche.
 #[derive(Debug, PartialEq, Eq)]
 pub enum LignesProjets {
@@ -142,6 +147,8 @@ const ID_QUITTER: &str = "quitter";
 enum Evt {
     /// Clic sur une entrée du menu (identifiant de l'entrée).
     Clic(String),
+    /// Clic sur une action d'un projet ; le chemin est résolu au moment du clic.
+    ClicProjet(ActionMenu, String),
     /// Un changement de mode vient de se terminer : redessiner.
     ModeChange,
     /// La config a été rechargée : reconstruire le sous-menu « Projets ».
@@ -155,17 +162,27 @@ struct Interface {
     tray: tray_icon::TrayIcon,
     lignes: Vec<tray_icon::menu::MenuItem>,
     projets: tray_icon::menu::Submenu,
-    /// Index d'un projet du sous-menu → son chemin tel qu'écrit dans `config.toml`.
-    chemins: Vec<String>,
 }
 
-/// Vide le sous-menu « Projets » puis le remplit ; rend les chemins, dans l'ordre des index.
+/// Index d'un projet du sous-menu → son chemin tel qu'écrit dans `config.toml`. Partagé entre
+/// le gestionnaire de clics et la boucle.
+#[cfg(feature = "menu")]
+type Chemins = Arc<std::sync::Mutex<Vec<String>>>;
+
+/// Vide le sous-menu « Projets » puis le remplit et met à jour `chemins`. En cas d'échec la
+/// liste reste vide : d'anciens chemins ne doivent jamais répondre aux nouveaux identifiants.
 #[cfg(feature = "menu")]
 fn remplir_projets(
     sous_menu: &tray_icon::menu::Submenu,
     lignes: &LignesProjets,
-) -> Result<Vec<String>, &'static str> {
+    chemins_partages: &Chemins,
+) -> Result<(), &'static str> {
     use tray_icon::menu::{MenuItem, MenuItemKind, PredefinedMenuItem, Submenu};
+
+    chemins_partages
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
 
     for item in sous_menu.items() {
         match item {
@@ -181,9 +198,9 @@ fn remplir_projets(
     match lignes {
         LignesProjets::Liste(projets) if !projets.is_empty() => {
             for (index, projet) in projets.iter().enumerate() {
-                let projet_menu = Submenu::new(&projet.nom, true);
+                let projet_menu = Submenu::new(texte_menu(&projet.nom), true);
                 projet_menu
-                    .append(&MenuItem::new(&projet.chemin, false, None))
+                    .append(&MenuItem::new(texte_menu(&projet.chemin), false, None))
                     .map_err(|_| "menu")?;
                 projet_menu
                     .append(&PredefinedMenuItem::separator())
@@ -218,7 +235,8 @@ fn remplir_projets(
             None,
         ))
         .map_err(|_| "menu")?;
-    Ok(chemins)
+    *chemins_partages.lock().unwrap_or_else(|e| e.into_inner()) = chemins;
+    Ok(())
 }
 
 /// Remet à `false` le drapeau d'édition, même si l'édition panique.
@@ -275,7 +293,11 @@ fn icone_tray(mode: Mode) -> Option<tray_icon::Icon> {
 }
 
 #[cfg(feature = "menu")]
-fn creer_interface(mode: Mode, config: &Path) -> Result<Interface, &'static str> {
+fn creer_interface(
+    mode: Mode,
+    config: &Path,
+    chemins: &Chemins,
+) -> Result<Interface, &'static str> {
     use tray_icon::TrayIconBuilder;
     use tray_icon::TrayIconEvent;
     use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -291,7 +313,7 @@ fn creer_interface(mode: Mode, config: &Path) -> Result<Interface, &'static str>
     let mut lignes = Vec::new();
     let projets = Submenu::new("Projets", true);
     let home = std::env::var_os("HOME");
-    let chemins = remplir_projets(&projets, &lignes_projets(config, home.as_deref()))?;
+    remplir_projets(&projets, &lignes_projets(config, home.as_deref()), chemins)?;
     for (entree, id) in entrees(mode).iter().zip(ids) {
         let ligne = match id {
             Some(id) => MenuItem::with_id(id, entree.libelle, entree.active, None),
@@ -320,7 +342,6 @@ fn creer_interface(mode: Mode, config: &Path) -> Result<Interface, &'static str>
         tray,
         lignes,
         projets,
-        chemins,
     })
 }
 
@@ -357,10 +378,28 @@ pub fn lancer_menu(daemon: Arc<Daemon>, en_marche: EnMarche) -> ! {
     }
     let proxy = boucle.create_proxy();
 
+    let chemins: Chemins = Arc::default();
+    let chemins_clic = Arc::clone(&chemins);
     let proxy_menu = Mutex::new(proxy.clone());
+    // Appelé de façon synchrone sur le fil principal : l'index est résolu en chemin ici, avant
+    // qu'une reconstruction du sous-menu en file puisse le décaler.
     MenuEvent::set_event_handler(Some(move |evenement: MenuEvent| {
+        let evt = match lire_id_projet(&evenement.id.0) {
+            Some((action, index)) => {
+                let chemin = chemins_clic
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(index)
+                    .cloned();
+                match chemin {
+                    Some(chemin) => Evt::ClicProjet(action, chemin),
+                    None => return,
+                }
+            }
+            None => Evt::Clic(evenement.id.0),
+        };
         if let Ok(proxy) = proxy_menu.lock() {
-            let _ = proxy.send_event(Evt::Clic(evenement.id.0));
+            let _ = proxy.send_event(evt);
         }
     }));
     let proxy_signal = proxy.clone();
@@ -379,18 +418,16 @@ pub fn lancer_menu(daemon: Arc<Daemon>, en_marche: EnMarche) -> ! {
         match evenement {
             // Sur macOS, l'icône se crée dans `Init`, comme le recommande tray-icon.
             Event::NewEvents(StartCause::Init) => {
-                match creer_interface(daemon.mode(), &daemon.chemin_config()) {
-                    Ok(i) => {
-                        interface = Some(i);
-                        // Le rappel part du fil de contrôle ou du fil d'édition : il ne fait
-                        // qu'envoyer un événement à la boucle.
-                        let proxy_projets = Mutex::new(proxy.clone());
-                        daemon.sur_config_changee(Box::new(move || {
-                            if let Ok(proxy) = proxy_projets.lock() {
-                                let _ = proxy.send_event(Evt::ProjetsChanges);
-                            }
-                        }));
+                // Rappel installé avant l'interface : un `ProjetsChanges` reçu trop tôt est
+                // ignoré. Il part du fil de contrôle ou d'édition et n'envoie qu'un événement.
+                let proxy_projets = Mutex::new(proxy.clone());
+                daemon.sur_config_changee(Box::new(move || {
+                    if let Ok(proxy) = proxy_projets.lock() {
+                        let _ = proxy.send_event(Evt::ProjetsChanges);
                     }
+                }));
+                match creer_interface(daemon.mode(), &daemon.chemin_config(), &chemins) {
+                    Ok(i) => interface = Some(i),
                     Err(genre) => {
                         log::error!("barre de menus impossible ({genre})");
                         if let Some(m) = en_marche.take() {
@@ -400,21 +437,17 @@ pub fn lancer_menu(daemon: Arc<Daemon>, en_marche: EnMarche) -> ! {
                     }
                 }
             }
+            Event::UserEvent(Evt::ClicProjet(action, chemin)) => lancer_edition(
+                &daemon,
+                match action {
+                    ActionMenu::Renommer => Action::Renommer(chemin),
+                    ActionMenu::ChangerDossier => Action::ChangerDossier(chemin),
+                    ActionMenu::Retirer => Action::Retirer(chemin),
+                },
+            ),
             Event::UserEvent(Evt::Clic(id)) => {
                 if id == ID_AJOUTER {
                     lancer_edition(&daemon, Action::Ajouter);
-                } else if let Some((action, index)) = lire_id_projet(&id) {
-                    let chemin = interface.as_ref().and_then(|i| i.chemins.get(index));
-                    if let Some(chemin) = chemin.cloned() {
-                        lancer_edition(
-                            &daemon,
-                            match action {
-                                ActionMenu::Renommer => Action::Renommer(chemin),
-                                ActionMenu::ChangerDossier => Action::ChangerDossier(chemin),
-                                ActionMenu::Retirer => Action::Retirer(chemin),
-                            },
-                        );
-                    }
                 }
                 let mode = match id.as_str() {
                     ID_ALLUMER => Some(Mode::Allume),
@@ -440,11 +473,11 @@ pub fn lancer_menu(daemon: Arc<Daemon>, en_marche: EnMarche) -> ! {
                 }
             }
             Event::UserEvent(Evt::ProjetsChanges) => {
-                if let Some(i) = &mut interface {
+                if let Some(i) = &interface {
                     let home = std::env::var_os("HOME");
                     let lignes = lignes_projets(&daemon.chemin_config(), home.as_deref());
-                    match remplir_projets(&i.projets, &lignes) {
-                        Ok(chemins) => i.chemins = chemins,
+                    match remplir_projets(&i.projets, &lignes, &chemins) {
+                        Ok(()) => {}
                         Err(genre) => log::error!("sous-menu Projets impossible ({genre})"),
                     }
                 }
@@ -597,5 +630,11 @@ mod tests {
         let config = dossier.path().join("config.toml");
         std::fs::write(&config, "ceci n'est pas = [du toml").unwrap();
         assert_eq!(lignes_projets(&config, None), LignesProjets::Invalide);
+    }
+
+    #[test]
+    fn texte_menu_double_les_esperluettes() {
+        assert_eq!(texte_menu("R&D"), "R&&D");
+        assert_eq!(texte_menu("a"), "a");
     }
 }
