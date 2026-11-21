@@ -377,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn test_purge_garde_l_ordre_des_sous_agents() {
+    fn purge_garde_l_ordre_des_sous_agents() {
         let mut r = registre_demarre();
         for (i, id) in ["a1", "a2", "a3", "a4"].iter().enumerate() {
             r.appliquer(&agent("SubagentStart", 400.0 + i as f64, id));
@@ -401,7 +401,7 @@ mod tests {
     }
 
     #[test]
-    fn test_session_affichee_a_egalite_premiere_inseree() {
+    fn session_affichee_a_egalite_premiere_inseree() {
         let mut r = Registre::default();
         r.appliquer(&evs("SessionStart", 5.0, "s1"));
         r.appliquer(&evs("SessionStart", 5.0, "s2"));

@@ -770,7 +770,7 @@ mod tests {
     }
 
     #[test]
-    fn filtrer_ne_garde_que_la_liste_fermee() {
+    fn test_filtrer_ne_garde_que_la_liste_fermee() {
         let t = tmp();
         let ev = filtrer(
             &corps(json!({
@@ -802,7 +802,7 @@ mod tests {
     }
 
     #[test]
-    fn filtrer_refuse() {
+    fn test_filtrer_refuse() {
         refuse(b"{pas du json");
         refuse(b"\xff\xfe");
         refuse(b"[1, 2]");
@@ -947,7 +947,7 @@ mod tests {
     }
 
     #[test]
-    fn filtrer_pid() {
+    fn test_filtrer_pid() {
         assert_eq!(avec_pid(Some("123")), Some(123));
         assert_eq!(avec_pid(None), None);
         for refuse in [
@@ -982,7 +982,7 @@ mod tests {
     }
 
     #[test]
-    fn filtrer_cwd() {
+    fn test_filtrer_cwd() {
         assert_eq!(avec_cwd("/a\u{0}b"), None);
         assert_eq!(avec_cwd("relatif/x"), None);
         assert_eq!(avec_cwd(""), None);
@@ -1002,7 +1002,7 @@ mod tests {
     }
 
     #[test]
-    fn filtrer_agent_id() {
+    fn test_filtrer_agent_id() {
         assert_eq!(avec_agent(""), None);
         assert_eq!(
             avec_agent("a19de871c0abcdef1").as_deref(),
@@ -1046,7 +1046,7 @@ mod tests {
     }
 
     #[test]
-    fn transcript_autorise_faux_sur_nul() {
+    fn test_transcript_autorise_faux_sur_nul() {
         let t = tmp();
         let racine = t.path().join("projects");
         fs::create_dir_all(&racine).unwrap();
@@ -1054,7 +1054,7 @@ mod tests {
     }
 
     #[test]
-    fn transcript_autorise_faux_sur_boucle_symlink() {
+    fn test_transcript_autorise_faux_sur_boucle_symlink() {
         let t = tmp();
         let racine = t.path().join("projects");
         fs::create_dir_all(racine.join("p")).unwrap();
@@ -1064,7 +1064,7 @@ mod tests {
     }
 
     #[test]
-    fn transcript_autorise_accepte_un_fichier_pas_encore_ecrit() {
+    fn test_transcript_autorise_accepte_un_fichier_pas_encore_ecrit() {
         let t = tmp();
         let racine = t.path().join("projects");
         fs::create_dir_all(racine.join("p")).unwrap();
@@ -1073,7 +1073,7 @@ mod tests {
     }
 
     #[test]
-    fn transcript_autorise_faux_sur_boucle_dans_un_repertoire() {
+    fn test_transcript_autorise_faux_sur_boucle_dans_un_repertoire() {
         let t = tmp();
         let racine = t.path().join("projects");
         fs::create_dir_all(&racine).unwrap();
@@ -1097,7 +1097,7 @@ mod tests {
     }
 
     #[test]
-    fn filtrer_efface_un_transcript_hors_racine() {
+    fn test_filtrer_efface_un_transcript_hors_racine() {
         let t = tmp();
         let ev = filtrer(
             &corps(json!({"hook_event_name": "Stop", "session_id": "s1", "transcript_path": "/etc/passwd.jsonl"})),

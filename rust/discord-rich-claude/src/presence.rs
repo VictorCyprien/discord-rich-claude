@@ -506,7 +506,7 @@ mod tests {
     }
 
     #[test]
-    fn premiere_carte_connecte_et_publie() {
+    fn test_premiere_carte_connecte_et_publie() {
         let (journal, h) = (Journal::default(), Horloge::default());
         let mut p = presence(&journal, &h);
         p.soumettre(Some(&carte("A")), Some("42"));
@@ -515,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn meme_carte_pas_republiee() {
+    fn test_meme_carte_pas_republiee() {
         let (journal, h) = (Journal::default(), Horloge::default());
         let mut p = presence(&journal, &h);
         p.soumettre(Some(&carte("A")), Some("42"));
@@ -525,7 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn rafale_regroupee_la_derniere_gagne() {
+    fn test_rafale_regroupee_la_derniere_gagne() {
         let (journal, h) = (Journal::default(), Horloge::default());
         let mut p = presence(&journal, &h);
         p.soumettre(Some(&carte("A")), Some("42"));
@@ -541,7 +541,7 @@ mod tests {
     }
 
     #[test]
-    fn plus_de_carte_efface_et_ferme_puis_reconnecte() {
+    fn test_plus_de_carte_efface_et_ferme_puis_reconnecte() {
         let (journal, h) = (Journal::default(), Horloge::default());
         let mut p = presence(&journal, &h);
         p.soumettre(Some(&carte("A")), Some("42"));
@@ -558,7 +558,7 @@ mod tests {
     }
 
     #[test]
-    fn sans_client_id_rien_ne_se_connecte() {
+    fn test_sans_client_id_rien_ne_se_connecte() {
         let (journal, h) = (Journal::default(), Horloge::default());
         let mut p = presence(&journal, &h);
         p.soumettre(Some(&carte("A")), None);
@@ -566,7 +566,7 @@ mod tests {
     }
 
     #[test]
-    fn connexion_refusee_reessai_apres_15_s() {
+    fn test_connexion_refusee_reessai_apres_15_s() {
         let (journal, h) = (Journal::default(), Horloge::default());
         let options = Options {
             echec_connexion: true,
@@ -583,7 +583,7 @@ mod tests {
     }
 
     #[test]
-    fn publication_refusee_abandonne_puis_reessaie() {
+    fn test_publication_refusee_abandonne_puis_reessaie() {
         let (journal, h) = (Journal::default(), Horloge::default());
         let options = Options {
             echec_publication: true,
@@ -603,7 +603,7 @@ mod tests {
     }
 
     #[test]
-    fn changement_de_client_id_reconnecte() {
+    fn test_changement_de_client_id_reconnecte() {
         let (journal, h) = (Journal::default(), Horloge::default());
         let mut p = presence(&journal, &h);
         p.soumettre(Some(&carte("A")), Some("42"));
@@ -644,7 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn echecs_de_connexion_repetes_un_seul_warning_puis_debug() {
+    fn test_echecs_de_connexion_repetes_un_seul_warning_puis_debug() {
         init_logs();
         let (journal, h) = (Journal::default(), Horloge::default());
         let options = Options {

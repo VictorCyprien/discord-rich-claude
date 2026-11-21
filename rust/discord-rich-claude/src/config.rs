@@ -352,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn test_client_id_booleen_refuse_tout() {
+    fn client_id_booleen_refuse_tout() {
         let (_t, d) = dossier();
         let f = ecrire(&d.join("c.toml"), "client_id = true\nrotation_s = 30\n");
         assert_eq!(charger(&f), Config::default());
@@ -418,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tilde_passe_par_home() {
+    fn tilde_passe_par_home() {
         let home = OsStr::new("/h/moi");
         assert_eq!(
             developper_tilde("~", Some(home)),
@@ -656,7 +656,7 @@ mod tests {
     }
 
     #[test]
-    fn test_config_par_defaut_texte_exact() {
+    fn config_par_defaut_texte_exact() {
         // Le texte exact de `CONFIG_PAR_DEFAUT` du Python.
         assert_eq!(
             CONFIG_PAR_DEFAUT,

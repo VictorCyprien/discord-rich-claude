@@ -411,7 +411,7 @@ mod tests {
     }
 
     #[test]
-    fn test_est_vue_b_exceptions_python() {
+    fn est_vue_b_exceptions_python() {
         assert_eq!(est_vue_b_strict(1.0, 0.0), Err("ZeroDivisionError"));
         assert_eq!(est_vue_b_strict(f64::NAN, 2.0), Err("ValueError"));
         assert_eq!(
@@ -537,7 +537,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cache_vide_quand_il_est_plein() {
+    fn cache_vide_quand_il_est_plein() {
         let cache: Cache = Mutex::new(HashMap::new());
         for i in 0..TAILLE_CACHE {
             resoudre_en_cache(&cache, &format!("/d{i}"), |c| Some(PathBuf::from(c)));

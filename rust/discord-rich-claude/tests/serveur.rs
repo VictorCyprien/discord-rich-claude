@@ -161,7 +161,7 @@ fn evenement_stop() -> Vec<u8> {
 }
 
 #[test]
-fn post_event() {
+fn test_post_event() {
     let _serie = serie();
     let b = banc();
     let r = b.requete(&post(&evenement_stop(), "X-Claude-Pid: 77\r\n"));
@@ -199,7 +199,7 @@ fn reponses_a_l_octet_pres() {
 }
 
 #[test]
-fn expect_100_continue() {
+fn test_expect_100_continue() {
     let _serie = serie();
     let b = banc();
     let r = b.requete(&post(&evenement_stop(), "Expect: 100-continue\r\n"));
@@ -208,7 +208,7 @@ fn expect_100_continue() {
 }
 
 #[test]
-fn corps_trop_gros_refuse() {
+fn test_corps_trop_gros_refuse() {
     let _serie = serie();
     let b = banc();
     let r = b.requete(b"POST /event HTTP/1.1\r\nContent-Length: 17000000\r\n\r\n");
@@ -225,7 +225,7 @@ fn content_length_negatif_refuse() {
 }
 
 #[test]
-fn sans_content_length() {
+fn test_sans_content_length() {
     let _serie = serie();
     let b = banc();
     assert!(
@@ -235,7 +235,7 @@ fn sans_content_length() {
 }
 
 #[test]
-fn route_inconnue() {
+fn test_route_inconnue() {
     let _serie = serie();
     let b = banc();
     assert!(
@@ -253,7 +253,7 @@ fn route_inconnue() {
 }
 
 #[test]
-fn etat() {
+fn test_etat() {
     let _serie = serie();
     let b = banc();
     assert_eq!(
@@ -263,7 +263,7 @@ fn etat() {
 }
 
 #[test]
-fn etat_sans_daemon() {
+fn test_etat_sans_daemon() {
     let _serie = serie();
     let d = dossier_court();
     assert_eq!(
@@ -300,7 +300,7 @@ fn interroger_etat_refuse_un_non_200_et_un_json_invalide() {
 }
 
 #[test]
-fn permissions() {
+fn test_permissions() {
     let _serie = serie();
     let b = banc();
     let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
@@ -309,7 +309,7 @@ fn permissions() {
 }
 
 #[test]
-fn deuxieme_instance_refusee() {
+fn test_deuxieme_instance_refusee() {
     let _serie = serie();
     let b = banc();
     let r = demarrer_serveur(&b.socket, Arc::new(Faux::default()), PathBuf::from("/x"));
@@ -319,7 +319,7 @@ fn deuxieme_instance_refusee() {
 }
 
 #[test]
-fn socket_orphelin_remplace() {
+fn test_socket_orphelin_remplace() {
     let _serie = serie();
     let d = dossier_court();
     let socket = d.path().join("orphelin.sock");
@@ -346,7 +346,7 @@ fn vrai_socket_mort_remplace() {
 }
 
 #[test]
-fn symlink_au_chemin_socket_est_remplace() {
+fn test_symlink_au_chemin_socket_est_remplace() {
     let _serie = serie();
     let d = dossier_court();
     let cible = d.path().join("ailleurs"); // jamais créée : le lien est pendant
@@ -366,7 +366,7 @@ fn symlink_au_chemin_socket_est_remplace() {
 }
 
 #[test]
-fn dossier_etat_symlink_refuse() {
+fn test_dossier_etat_symlink_refuse() {
     let _serie = serie();
     let d = dossier_court();
     let ailleurs = d.path().join("ailleurs");
@@ -400,7 +400,7 @@ fn dossier_etat_fichier_refuse() {
 }
 
 #[test]
-fn erreur_du_gestionnaire_n_arrete_pas_le_serveur() {
+fn test_erreur_du_gestionnaire_n_arrete_pas_le_serveur() {
     let _serie = serie();
     let b = banc_avec(Faux {
         echec_premier: true,
@@ -417,7 +417,7 @@ fn erreur_du_gestionnaire_n_arrete_pas_le_serveur() {
 }
 
 #[test]
-fn erreur_inattendue_repond_500() {
+fn test_erreur_inattendue_repond_500() {
     let _serie = serie();
     let b = banc_avec(Faux {
         panique_etat: true,

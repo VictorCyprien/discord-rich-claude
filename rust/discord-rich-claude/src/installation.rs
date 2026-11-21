@@ -559,7 +559,7 @@ mod tests {
     }
 
     #[test]
-    fn ajouter_pose_les_8_evenements() {
+    fn test_ajouter_pose_les_8_evenements() {
         let s = ajouter(&json!({}));
         let cles: std::collections::HashSet<_> =
             s["hooks"].as_object().unwrap().keys().cloned().collect();
@@ -574,7 +574,7 @@ mod tests {
     }
 
     #[test]
-    fn ajouter_conserve_les_hooks_tiers_et_ne_modifie_pas_l_entree() {
+    fn test_ajouter_conserve_les_hooks_tiers_et_ne_modifie_pas_l_entree() {
         let avant = settings_tiers();
         let copie = avant.clone();
         let s = ajouter(&avant);
@@ -611,13 +611,13 @@ mod tests {
     }
 
     #[test]
-    fn ajouter_est_idempotent() {
+    fn test_ajouter_est_idempotent() {
         let une_fois = ajouter(&settings_tiers());
         assert_eq!(ajouter(&une_fois), une_fois);
     }
 
     #[test]
-    fn retirer_ne_retire_que_les_notres() {
+    fn test_retirer_ne_retire_que_les_notres() {
         assert_eq!(
             retirer_hooks(&ajouter(&settings_tiers())).unwrap(),
             settings_tiers()
@@ -625,7 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn retirer_d_un_groupe_mixte_garde_le_hook_tiers() {
+    fn test_retirer_d_un_groupe_mixte_garde_le_hook_tiers() {
         let s = json!({"hooks": {"Stop": [{"hooks": [tiers(), {"type": "command", "command": COMMANDE_HOOK}]}]}});
         assert_eq!(
             retirer_hooks(&s).unwrap(),
@@ -634,7 +634,7 @@ mod tests {
     }
 
     #[test]
-    fn retirer_sans_hooks_ne_change_rien() {
+    fn test_retirer_sans_hooks_ne_change_rien() {
         assert_eq!(
             retirer_hooks(&json!({"model": "opus"})).unwrap(),
             json!({"model": "opus"})
@@ -669,7 +669,7 @@ mod tests {
     }
 
     #[test]
-    fn modifier_settings_sauvegarde_puis_ecrit() {
+    fn test_modifier_settings_sauvegarde_puis_ecrit() {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("settings.json");
         ecrire(&f, &settings_tiers());
@@ -693,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn modifier_settings_refuse_n_ecrit_rien() {
+    fn test_modifier_settings_refuse_n_ecrit_rien() {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("settings.json");
         ecrire(&f, &settings_tiers());
@@ -726,7 +726,7 @@ mod tests {
     }
 
     #[test]
-    fn modifier_settings_inchange() {
+    fn test_modifier_settings_inchange() {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("settings.json");
         ecrire(&f, &json!({"model": "opus"}));
@@ -738,7 +738,7 @@ mod tests {
     }
 
     #[test]
-    fn modifier_settings_fichier_absent() {
+    fn test_modifier_settings_fichier_absent() {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("settings.json");
         assert_eq!(
@@ -751,7 +751,7 @@ mod tests {
     }
 
     #[test]
-    fn modifier_settings_invalide_leve_sans_ecrire() {
+    fn test_modifier_settings_invalide_leve_sans_ecrire() {
         for contenu in ["{pas du json", "[1, 2]"] {
             let d = tempfile::tempdir().unwrap();
             let f = d.path().join("settings.json");
@@ -763,7 +763,7 @@ mod tests {
     }
 
     #[test]
-    fn modifier_settings_detecte_changement_concurrent() {
+    fn test_modifier_settings_detecte_changement_concurrent() {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("settings.json");
         ecrire(&f, &settings_tiers());
@@ -786,7 +786,7 @@ mod tests {
     }
 
     #[test]
-    fn modifier_settings_detecte_apparition_du_fichier() {
+    fn test_modifier_settings_detecte_apparition_du_fichier() {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("settings.json");
         let f2 = f.clone();
@@ -805,7 +805,7 @@ mod tests {
     }
 
     #[test]
-    fn modifier_settings_conserve_les_droits() {
+    fn test_modifier_settings_conserve_les_droits() {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("settings.json");
         ecrire(&f, &settings_tiers());
@@ -862,7 +862,7 @@ mod tests {
     }
 
     #[test]
-    fn modifier_settings_deux_sauvegardes_meme_seconde_ne_s_ecrasent_pas() {
+    fn test_modifier_settings_deux_sauvegardes_meme_seconde_ne_s_ecrasent_pas() {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("settings.json");
         ecrire(&f, &settings_tiers());
@@ -938,7 +938,7 @@ mod tests {
     }
 
     #[test]
-    fn retirer_garde_un_objet_hooks_deja_vide() {
+    fn test_retirer_garde_un_objet_hooks_deja_vide() {
         assert_eq!(
             retirer_hooks(&json!({"hooks": {}})).unwrap(),
             json!({"hooks": {}})
@@ -946,25 +946,25 @@ mod tests {
     }
 
     #[test]
-    fn retirer_leve_si_hooks_n_est_pas_un_objet() {
+    fn test_retirer_leve_si_hooks_n_est_pas_un_objet() {
         assert!(retirer_hooks(&json!({"hooks": "abc"})).is_err());
         assert!(retirer_hooks(&json!({"hooks": null})).is_err());
     }
 
     #[test]
-    fn ajouter_leve_si_hooks_n_est_pas_un_objet() {
+    fn test_ajouter_leve_si_hooks_n_est_pas_un_objet() {
         assert!(ajouter_t(&json!({"hooks": "abc"})).is_err());
         assert!(ajouter_t(&json!({"hooks": null})).is_err());
     }
 
     #[test]
-    fn ajouter_leve_si_un_evenement_n_est_pas_une_liste_et_nomme_l_evenement() {
+    fn test_ajouter_leve_si_un_evenement_n_est_pas_une_liste_et_nomme_l_evenement() {
         let e = ajouter_t(&json!({"hooks": {"Stop": "abc"}})).unwrap_err();
         assert!(e.contains("Stop"));
     }
 
     #[test]
-    fn ajouter_preserve_un_groupe_malforme_sans_planter() {
+    fn test_ajouter_preserve_un_groupe_malforme_sans_planter() {
         let s = json!({"hooks": {"Stop": [{"hooks": null}]}});
         let r = ajouter(&s);
         let groupes = r["hooks"]["Stop"].as_array().unwrap();
@@ -1081,7 +1081,7 @@ mod tests {
     }
 
     #[test]
-    fn installer_launch_agent_ecrit_le_plist_avant_le_bootout() {
+    fn test_installer_launch_agent_ecrit_le_plist_avant_le_bootout() {
         let d = tempfile::tempdir().unwrap();
         let chemin = d.path().join("LaunchAgents").join(format!("{LABEL}.plist"));
         let mut vu = vec![];
@@ -1097,7 +1097,7 @@ mod tests {
     }
 
     #[test]
-    fn installer_launch_agent_echec_ecriture_n_appelle_pas_launchctl() {
+    fn test_installer_launch_agent_echec_ecriture_n_appelle_pas_launchctl() {
         // SAFETY : `geteuid` n'a aucun effet de bord. Root ignore les droits.
         if unsafe { libc::geteuid() } == 0 {
             return;
@@ -1126,7 +1126,7 @@ mod tests {
     }
 
     #[test]
-    fn installer_launch_agent_reessaie_bootstrap_sur_code_5_puis_reussit() {
+    fn test_installer_launch_agent_reessaie_bootstrap_sur_code_5_puis_reussit() {
         let d = tempfile::tempdir().unwrap();
         let chemin = d.path().join("a").join("p.plist");
         let mut appels = vec![];
@@ -1147,7 +1147,7 @@ mod tests {
     }
 
     #[test]
-    fn installer_launch_agent_reessaie_bootstrap_sur_code_37() {
+    fn test_installer_launch_agent_reessaie_bootstrap_sur_code_37() {
         let d = tempfile::tempdir().unwrap();
         let chemin = d.path().join("a").join("p.plist");
         let mut appels = vec![];
@@ -1165,7 +1165,7 @@ mod tests {
     }
 
     #[test]
-    fn installer_launch_agent_echoue_apres_3_tentatives_sur_code_5() {
+    fn test_installer_launch_agent_echoue_apres_3_tentatives_sur_code_5() {
         let d = tempfile::tempdir().unwrap();
         let chemin = d.path().join("a").join("p.plist");
         let mut appels = vec![];
@@ -1185,7 +1185,7 @@ mod tests {
     }
 
     #[test]
-    fn installer_launch_agent_autre_code_echoue_sans_reessai() {
+    fn test_installer_launch_agent_autre_code_echoue_sans_reessai() {
         let d = tempfile::tempdir().unwrap();
         let chemin = d.path().join("a").join("p.plist");
         let mut appels = vec![];

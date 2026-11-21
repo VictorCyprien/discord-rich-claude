@@ -368,7 +368,7 @@ fn test_install_settings_invalide_imprime_sur_stderr_sans_trace_et_retourne_1() 
 }
 
 #[test]
-fn test_install_settings_json_invalide() {
+fn install_settings_json_invalide() {
     let _s = serie();
     let (dossier, chemins) = chemins_temporaires();
     fs::create_dir_all(chemins.settings_claude.parent().unwrap()).unwrap();
@@ -485,7 +485,7 @@ fn install_plist_pointe_dans_le_bundle() {
 }
 
 #[test]
-fn test_install_refuse_par_l_utilisateur_n_ecrit_rien() {
+fn install_refuse_par_l_utilisateur_n_ecrit_rien() {
     let _s = serie();
     let (dossier, chemins) = chemins_temporaires();
     let r = installer(&chemins, &binaire_factice(dossier.path()), 501, false);

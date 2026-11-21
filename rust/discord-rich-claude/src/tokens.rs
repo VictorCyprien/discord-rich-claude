@@ -1223,7 +1223,7 @@ mod tests {
     // --- ajouts propres au port ---
 
     #[test]
-    fn test_parcours_ne_suit_pas_les_dossiers_lies() {
+    fn parcours_ne_suit_pas_les_dossiers_lies() {
         let c = cadre();
         let d = tempfile::tempdir().unwrap();
         let hors = tempfile::tempdir().unwrap();
@@ -1256,7 +1256,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compteurs_comme_int_de_python() {
+    fn compteurs_comme_int_de_python() {
         let attendu = |v: Value| compteur(Some(&v));
         assert_eq!(attendu(json!(7)), Some(7));
         assert_eq!(attendu(json!(7.9)), Some(7));
@@ -1282,7 +1282,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extraire_identifiants_et_exceptions() {
+    fn extraire_identifiants_et_exceptions() {
         let base = |id: Value, uuid: Value, req: Value| json!({"uuid": uuid, "requestId": req, "message": {"id": id, "usage": {"output_tokens": 1}}});
         let cle = |v: Value| extraire(&v).map(|e| e.0);
         assert_eq!(
@@ -1313,7 +1313,7 @@ mod tests {
     }
 
     #[test]
-    fn test_horodatage_formats_acceptes() {
+    fn horodatage_formats_acceptes() {
         let h = |s: &str| horodatage(&json!(s));
         assert_eq!(
             h("2026-11-20T20:05:25.931211+01:00"),
