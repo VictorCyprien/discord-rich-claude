@@ -3,6 +3,7 @@ name = "discord-rich-claude"
 version = "0.1.0"
 edition = "2024"
 description = "Discord Rich Presence pour Claude Code"
+license = "MIT"
 
 [lib]
 name = "discord_rich_claude"

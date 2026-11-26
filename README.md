@@ -1,5 +1,7 @@
 # discord-rich-claude
 
+> Projet personnel non officiel, sans lien avec Anthropic ni Discord, ni approuvé par eux. Claude et Claude Code sont des marques d'Anthropic ; Discord est une marque de Discord Inc.
+
 L'app de barre de menus s'appelle Clauderune (`~/Applications/Clauderune.app`) ; la commande reste `discord-rich-claude`.
 
 Affiche sur ton profil Discord une carte « Joue à ClaudeCode » quand une session Claude Code tourne : activité en cours, modèle, tokens, durée. Le nom du projet n'apparaît que pour les dossiers que tu autorises.
@@ -144,3 +146,7 @@ DRC_LOG=DEBUG cargo run -- run
 Conventions de code et de test : voir `CLAUDE.md`.
 
 Spec : `docs/superpowers/specs/2026-09-18-discord-rich-claude-design.md`.
+
+## Licence
+
+MIT, voir [`LICENSE`](LICENSE).
